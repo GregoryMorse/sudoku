@@ -1408,27 +1408,27 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   
   return (
-    #standard_sudoku(diff_sudoku),
-    #standard_sudoku(nytimes_hard_sudoku),
-    #standard_sudoku(very_hard_sudoku),
-    #standard_sudoku(technique_sudoku),
-    #standard_sudoku(champion_sudoku),
-    #standard_sudoku(diabolical_sudoku),
-    #standard_sudoku(swordfish_sudoku),
-    #standard_sudoku(advanced_sudoku),
-    #standard_sudoku(hardest_sudoku),
-    #standard_sudoku(extreme_sudoku),
-    #knight_thermo_magic_square_sudoku(aad_tribute_sudoku, aad_tribute_thermo, aad_magic_square_centers),
-    #king_knight_orthagonal_sudoku(miracle_sudoku),
-    #thermo_sudoku(thermo_app_sudoku, thermo_app_sudoku_thermometers),
-    #king_sudoku(pi_king_sudoku),
-    #knight_sudoku(us_championship_knights_sudoku),
-    #knight_sudoku(expert_knights_sudoku),
-    #jigsaw_sudoku(prize_sudoku, prize_sudoku_jigsaw),
-    #partial_border_jigsaw_sudoku(prize_sudoku, prize_sudoku_subsquare_exc),
-    #partial_border_diagonal_thermo_sudoku(nightmare_sudoku, nightmare_sudoku_subsquare_exc, nightmare_sudoku_thermo),
-    #killer_cages_sudoku(killer_xxl_sudoku, 9),
-    )   
+    standard_sudoku(diff_sudoku),
+    standard_sudoku(nytimes_hard_sudoku),
+    standard_sudoku(very_hard_sudoku),
+    standard_sudoku(technique_sudoku),
+    standard_sudoku(champion_sudoku),
+    standard_sudoku(diabolical_sudoku),
+    standard_sudoku(swordfish_sudoku),
+    standard_sudoku(advanced_sudoku),
+    standard_sudoku(hardest_sudoku),
+    standard_sudoku(extreme_sudoku),
+    knight_thermo_magic_square_sudoku(aad_tribute_sudoku, aad_tribute_thermo, aad_magic_square_centers),
+    king_knight_orthagonal_sudoku(miracle_sudoku),
+    thermo_sudoku(thermo_app_sudoku, thermo_app_sudoku_thermometers),
+    king_sudoku(pi_king_sudoku),
+    knight_sudoku(us_championship_knights_sudoku),
+    knight_sudoku(expert_knights_sudoku),
+    jigsaw_sudoku(prize_sudoku, prize_sudoku_jigsaw),
+    partial_border_jigsaw_sudoku(prize_sudoku, prize_sudoku_subsquare_exc),
+    partial_border_diagonal_thermo_sudoku(nightmare_sudoku, nightmare_sudoku_subsquare_exc, nightmare_sudoku_thermo),
+    killer_cages_sudoku(killer_xxl_sudoku, 9),
+    )
 
 def get_impossible_puzzles():
   #https://www.theguardian.com/media/2010/aug/23/worlds-hardest-sudoku-solution
