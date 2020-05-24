@@ -101,9 +101,9 @@ def check_bad_sudoku(rem):
   if any(any(len(y) == 0 for y in x) for x in rem): return True
   return False
 LAST_DIGIT,FULL_HOUSE,NAKED_SINGLE,HIDDEN_SINGLE,LOCKED_CANDIDATES,NAKED_MULTIPLES,HIDDEN_MULTIPLES,BASIC_FISH,FINNED_FISH,X_CHAIN,XY_CHAIN=0,1,2,3,4,5,6,7,8,9,10
-KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE=11,12,13,14,15,16,17
+KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE,SANDWICH_RULE,ARROW_RULE=11,12,13,14,15,16,17,18,19
 STRING_RULES = ("Last Digit", "Full House", "Naked Single", "Hidden Single", "Locked Candidates", "Naked %s", "Hidden %s", "Basic Fish", "Finned Fish", "X-Chain", "XY-Chain",
-                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square")
+                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square", "Sandwich Rule", "Arrow Rule")
 def naked_single(rem, mutex_rules, cell_visibility_rules, value_set):
   l, possible = len(rem), []
   #should find the full houses before naked singles followed by hidden singles
@@ -420,7 +420,7 @@ def sudoku_loop(rem, mutex_rules, cell_visibility_rules, exclude_rule, value_set
   while True:
     rem, found = exclude_sudoku_by_group(rem, mutex_rules, cell_visibility_rules, exclude_rule, value_set)
     if any(any(len(y) == 0 for y in x) for x in rem):
-      print_sudoku(rem)
+      #print_candidate_format(rem)
       return None, solve_path
     if found is None: break
     solve_path.append(found)
@@ -860,7 +860,19 @@ def killer_to_jigsaw(killer, l):
 #print_border(killer_to_jigsaw(killer_xxl_sudoku, 9), exc_from_border(killer_to_jigsaw(killer_xxl_sudoku, 9), frozenset()))
 #print_border(((None,) * 9,) * 9, exc_from_border(killer_to_jigsaw(killer_xxl_sudoku, 9), frozenset()))
 
-def exclude_magic_square_rule_gen(magic_square_centers):
+def exclude_magic_square_rule_gen(magic_squares):
+  def center(ms, s):
+    return ms[s >> 1][s >> 1]
+  def diagonals(ms, s):
+    return frozenset([ms[i][i] for i in range(s)] + [ms[i][s-1-i] for i in range(s)]) - (frozenset() if s & 1 == 0 else frozenset((center(ms, s),)))
+  def orthagonals(ms, s):
+    l = set()
+    for i in range(s):
+      for j in range(s):
+        if i == j or i == s-1-j: continue
+        l.add(ms[i][j])
+    return l
+    #return [i for i in ms] + [tuple(ms[j][i] for j in range(s)) for i in range(s)]
   def exclude_magic_square_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
     s = isqrt(len(value_set))
@@ -870,19 +882,23 @@ def exclude_magic_square_rule_gen(magic_square_centers):
     vals = {k: len(tuple(c for c in combs if k in c)) for k in value_set}
     r = {k for k in vals if vals[k] >= 4}
     n = {k for k in vals if vals[k] == 3}
-    s = {k for k in vals if vals[k] == 2}
+    q = {k for k in vals if vals[k] == 2}
     #middle is part of 4 sums, 4 corners are part of 3 sums, remaining 4 part of 2 sums
-    if len(r) == 1 and len(n) == 4 and len(s) == 4:
-      for magic_square_center in magic_square_centers:
+    #odd magic squares: center has 4 shared values
+    #all magic squares: all diagonals have 3 shared values, all others 2 shared values
+    if len(r) == 1 and len(n) == 4 and len(q) == 4:
+      for ms in magic_squares:
         exclude = []
-        for y in rem[magic_square_center[0]][magic_square_center[1]].difference(r):
-          exclude.append((magic_square_center[0], magic_square_center[1], y))
-        for p in diagonal_pts(magic_square_center[0], magic_square_center[1]):
-          for y in rem[p[0]][p[1]].difference(n):
-            exclude.append((p[0], p[1], y))
-        for p in orthagonal_pts(magic_square_center[0], magic_square_center[1]):
-          for y in rem[p[0]][p[1]].difference(s):
-            exclude.append((p[0], p[1], y))
+        if s & 1 == 1:
+          c = center(ms, s)
+          for y in rem[c[0]][c[1]].difference(r):
+            exclude.append((c[0], c[1], y))
+          for p in diagonals(ms, s):
+            for y in rem[p[0]][p[1]].difference(n):
+              exclude.append((p[0], p[1], y))
+          for p in orthagonals(ms, s):
+            for y in rem[p[0]][p[1]].difference(q):
+              exclude.append((p[0], p[1], y))
         if len(exclude) != 0: possible.append((exclude, MAGIC_SQUARE, ()))
     return possible
   return exclude_magic_square_rule
@@ -927,7 +943,34 @@ def exclude_thermo_rule_gen(thermo):
     if len(exclude) != 0: possible.append((exclude, THERMO_RULE, ()))
     return possible
   return exclude_thermo_rule
-  
+def exclude_arrow_rule_gen(arrows, increasing):
+  def exclude_arrow_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+    l, possible = len(rem), []
+    maxarrow = max(value_set)
+    mins = [] #mins nearest rounded down, maxes nearest rounded up
+    for x in sorted(value_set):
+      if len(mins) == 0: mins.append(x)
+      else: mins.append(mins[-1] + x)
+    for a in arrows:
+      #if len(a) == 1: #cannot happen as it would be have to be 0 or a broken arrow
+      #if len(a) == 2: #equal values, only possible on diagonal
+      minarrow = mins[len(a) - 1 - 1]
+      possibles = [set() for _ in range(len(a))]
+      for x in set(range(minarrow, maxarrow + 1)).intersection(rem[a[0][0]][a[0][1]]):
+        sols = get_all_mutex_digit_sum_sets(x, [rem[p[0]][p[1]] for p in a[1:]], set((x,)))
+        if increasing: sols = list(filter(lambda s: all(s[i-1] > s[i] for i in range(1,len(s))), sols)) #increases from point of arrow to circle 
+        if len(sols) != 0:
+          possibles[0].add(x)
+          for s in sols:
+            for i, y in enumerate(s):
+              possibles[1+i].add(y)
+      exclude = []
+      for i, p in enumerate(a):
+        for y in rem[p[0]][p[1]].difference(possibles[i]):
+          exclude.append((p[0], p[1], y))
+      if len(exclude) != 0: possible.append((exclude, ARROW_RULE, ()))
+    return possible
+  return exclude_arrow_rule
 def get_all_mutex_digit_sum(total, digits, value_set):
   combs = []
   for comb in itertools.combinations(value_set, digits):
@@ -1066,6 +1109,60 @@ def exclude_cage_mirror_rule_gen(cages):
     if len(exclude) != 0: possible.append((exclude, MIRROR_CAGE_CELL, ()))
     return possible
   return exclude_cage_mirror_rule
+def exclude_sandwich_rule_gen(sandwiches):
+  def exclude_sandwich_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+    l, possible = len(rem), []
+    tot = sum(value_set)
+    mins, maxes = [], [] #mins nearest rounded down, maxes nearest rounded up
+    sandwichset = set((min(value_set), max(value_set))) #1 and 9
+    for x in sorted(value_set):
+      if len(mins) == 0: mins.append(x)
+      else: mins.append(mins[-1] + x)
+    for x in reversed(sorted(value_set)):
+      if len(maxes) == 0: maxes.append(x)
+      else: maxes.append(maxes[-1] + x)
+    for x in sandwiches:
+      remtot = tot - sum(sandwichset) - x[0]
+      maxlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], mins)))
+      minlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], maxes)))
+      if x[0] != 0 and maxes[minlen-1] != x[0]: minlen += 1
+      contig = tuple(sorted(x[1]))
+      possibles = [set() for _ in range(len(x[1]))]
+      for z in range(minlen, maxlen+1, 1):
+        #first pivot to 1s and 9s that are spaced correctly
+        #then check inside the sandwich combinations along with all of its outside the sandwich combinations
+        #for each combination that works add to an inclusive set
+        for p in range(1, len(x[1]) - z):
+          p1, p2 = contig[p-1], contig[p + z]
+          v1, v2 = rem[p1[0]][p1[1]].intersection(sandwichset), rem[p2[0]][p2[1]].intersection(sandwichset)
+          if len(v1) == 0 or len(v2) == 0: continue
+          elif len(v1) == 1 and len(v2) == 1 and v1 == v2: continue
+          elif len(v1) == 1 and len(v2) == 2: v2 -= v1
+          elif len(v1) == 2 and len(v2) == 1: v1 -= v2
+          if x[0] != 0:
+            res = get_all_mutex_digit_sum_sets(x[0], [rem[contig[i][0]][contig[i][1]] for i in range(p, p+z)], sandwichset)
+          else: res = []
+          if z != len(x[1]) - 1 - 1: #x[0] != tot - sum(sandwichset) and 
+            remres = get_all_mutex_digit_sum_sets(remtot, [rem[contig[i][0]][contig[i][1]] for i in range(len(x[1])) if i < p-1 or i > p + z], sandwichset)
+          else: remres = []
+          if x[0] == 0 and len(remres) != 0 or z == len(x[1]) - 1 - 1 and len(res) != 0 or len(res) != 0 and len(remres) != 0:
+            possibles[p-1] |= v1
+            possibles[p+z] |= v2
+            for y in res:
+              for i in range(p, p+z):
+                possibles[i].add(y[i - p])
+            for y in remres:
+              for i in range(len(x[1])):
+                if i < p-1: possibles[i].add(y[i])
+                elif i > p + z: possibles[i].add(y[i - z - 1 - 1]) #p - 1 + i - p - z - 1
+      #exclude all combinations that are not in the inclusive set
+      exclude = []
+      for i in range(len(x[1])):
+        for y in rem[contig[i][0]][contig[i][1]].difference(possibles[i]):
+          exclude.append((contig[i][0], contig[i][1], y))
+      if len(exclude) != 0: possible.append((exclude, SANDWICH_RULE, ()))
+    return possible
+  return exclude_sandwich_rule
 def exclude_orthagonal(rem, mutex_rules, cell_visibility_rules, value_set):
   l, possible = len(rem), []
   for i in range(l):
@@ -1090,19 +1187,26 @@ def jigsaw_points_gen(jigsaw):
   return jigsaw_points
 def killer_puzzle_gen(killer):
   return jigsaw_points_gen([y for _, y in killer])
-def magic_square_center_to_killer_cages(msc, value_set):
+def magic_square_rows(msc, size, gaps):
+  rows = []
+  for i in range(-(size >> 1), (size >> 1) + 1):
+    rows.append(tuple((msc[0] + i * (gaps + 1), msc[1] + j * (gaps + 1)) for j in range(-(size >> 1), (size >> 1) + 1)))
+  return rows
+def magic_square_center_to_killer_cages(ms, value_set):
   l = len(value_set)
   s = isqrt(l)
   if s * s != l: return possible
-  s = sum(value_set) // s
-  return ((s, ((msc[0] - 1, msc[1] - 1), (msc[0] - 1, msc[1]), (msc[0] - 1, msc[1] + 1))),
-          (s, ((msc[0], msc[1] - 1), (msc[0], msc[1]), (msc[0], msc[1] + 1))),
-          (s, ((msc[0] + 1, msc[1] - 1), (msc[0] + 1, msc[1]), (msc[0] + 1, msc[1] + 1))),
-          (s, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1] - 1), (msc[0] + 1, msc[1] - 1))),
-          (s, ((msc[0] - 1, msc[1]), (msc[0], msc[1]), (msc[0] + 1, msc[1]))),
-          (s, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1] + 1), (msc[0] + 1, msc[1] + 1))),
-          (s, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] + 1))),
-          (s, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] - 1))))
+  sm = sum(value_set) // s
+  return [*((sm, x) for x in ms), *((sm, tuple(ms[j][i] for j in range(s))) for i in range(s)),
+          (sm, tuple(ms[i][i] for i in range(s))), (sm, tuple(ms[i][s-1-i] for i in range(s)))]  
+  #return ((sm, ((msc[0] - 1, msc[1] - 1), (msc[0] - 1, msc[1]), (msc[0] - 1, msc[1] + 1))),
+  #        (sm, ((msc[0], msc[1] - 1), (msc[0], msc[1]), (msc[0], msc[1] + 1))),
+  #        (sm, ((msc[0] + 1, msc[1] - 1), (msc[0] + 1, msc[1]), (msc[0] + 1, msc[1] + 1))),
+  #        (sm, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1] - 1), (msc[0] + 1, msc[1] - 1))),
+  #        (sm, ((msc[0] - 1, msc[1]), (msc[0], msc[1]), (msc[0] + 1, msc[1]))),
+  #        (sm, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1] + 1), (msc[0] + 1, msc[1] + 1))),
+  #        (sm, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] + 1))),
+  #        (sm, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] - 1))))
 
 def check_puzzle(y):
   rem, solve_path, border = solve_sudoku(y[0], y[1], y[2], y[3], y[4], y[5])
@@ -1133,11 +1237,16 @@ def king_sudoku(puzzle):
 def knight_sudoku(puzzle):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (knight_rule_points,), (), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
-def knight_thermo_magic_square_sudoku(puzzle, thermo, magic_square_centers):
+def knight_thermo_magic_square_sudoku(puzzle, thermo, magic_squares):
   l = len(puzzle)
-  killer = magic_square_center_to_killer_cages(magic_square_centers[0], frozenset(range(1, l+1)))
-  print(killer)
-  return (puzzle, standard_sudoku_mutex_regions(l), (knight_rule_points,), (exclude_magic_square_rule_gen(magic_square_centers), exclude_killer_rule_gen(killer), exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+  ms = [magic_square_rows((x[0], x[1]), x[2], x[3]) for x in magic_squares]
+  killers = [magic_square_center_to_killer_cages(x, frozenset(range(1, l+1))) for x in ms]
+  return (puzzle, standard_sudoku_mutex_regions(l), (knight_rule_points,), (exclude_magic_square_rule_gen(ms), *(exclude_killer_rule_gen(killer) for killer in killers), exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def king_knight_magic_square_sudoku(puzzle, magic_squares):
+  l = len(puzzle)
+  ms = [magic_square_rows((x[0], x[1]), x[2], x[3]) for x in magic_squares]
+  killers = [magic_square_center_to_killer_cages(x, frozenset(range(1, l+1))) for x in ms]
+  return (puzzle, standard_sudoku_mutex_regions(l), (king_rule_points,knight_rule_points,), (exclude_magic_square_rule_gen(ms), *(exclude_killer_rule_gen(killer) for killer in killers),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
 def king_knight_orthagonal_sudoku(puzzle):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (king_rule_points,knight_rule_points,), (exclude_orthagonal,), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
@@ -1148,6 +1257,9 @@ def jigsaw_sudoku(puzzle, jigsaw):
 def thermo_sudoku(puzzle, thermo):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def arrow_sudoku(puzzle, arrows, increasing):
+  l = len(puzzle)
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_arrow_rule_gen(arrows, increasing),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
 def partial_border_jigsaw_sudoku(puzzle, exclusions):
   l = len(puzzle)
   return (puzzle, standard_sudoku_singoverlap_regions(l), (), (), frozenset(range(1, l+1)), lambda: brute_border(exclusions, l, puzzle, standard_sudoku_singoverlap_regions(l), (), (), frozenset(range(1, l+1)))[1],
@@ -1162,6 +1274,14 @@ def killer_cages_sudoku(killer, l):
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...
   return (((None,) * l,) * l, standard_sudoku_mutex_regions(l), (jigsaw_points_gen(killer_to_jigsaw(killer, l)),), (exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), frozenset(range(1, l+1)), None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
+def sandwich_sudoku(puzzle, sandwich_row_cols):
+  l = len(puzzle)
+  sandwiches = [(x, row_points(i, 0, l)) for i, x in enumerate(sandwich_row_cols[0]) if not x is None] + [(x, column_points(0, i, l)) for i, x in enumerate(sandwich_row_cols[1]) if not x is None]
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_sandwich_rule_gen(sandwiches),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format)) 
+def sandwich_arrow_sudoku(puzzle, arrows, increasing, sandwich_row_cols):
+  l = len(puzzle)
+  sandwiches = [(x, row_points(i, 0, l)) for i, x in enumerate(sandwich_row_cols[0]) if not x is None] + [(x, column_points(0, i, l)) for i, x in enumerate(sandwich_row_cols[1]) if not x is None]
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_arrow_rule_gen(arrows, increasing), exclude_sandwich_rule_gen(sandwiches),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format)) 
   
 def file_puzzles(filename):
   with open(filename) as f:
@@ -1386,7 +1506,20 @@ def get_ctc_puzzles():
     ((7, 7), (8, 6), (8, 5), (8, 4), (8, 3), (8, 2), (7, 1))
   )
   
-  aad_tribute_sudoku = (
+  slippery_sandwich_sudoku = ( #https://www.youtube.com/watch?v=e5v4_Z1b_mg
+    (None, None, None, None, None, None, None, None, None),
+    (None, 4, None, None, 2, None, None, 3, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, 2, None, None, None, None, None, 1, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, 6, None, None, 9, None, None, 5, None),
+    (None, None, None, None, None, None, None, None, None))
+    
+  slippery_sandwich_row_cols = ((17, 17, 17, 17, 20, 22, 27, 17, 0), (17, 17, 17, 17, 20, 22, 27, 17, 0))
+  
+  aad_tribute_sudoku = ( #https://www.youtube.com/watch?v=LuFvoFkqZDA
     (2, None, None, None, None, None, None, None, 5),
     (None, None, None, None, None, None, None, None, None),
     (8, None, None, None, None, None, None, None, None),
@@ -1398,7 +1531,51 @@ def get_ctc_puzzles():
     (5, None, None, None, None, None, None, None, 8))
     
   aad_tribute_thermo = (((1, 7), (2, 6), (3, 5), (4, 4), (5, 3), (6, 2), (7, 1)),)
-  aad_magic_square_centers = ((4, 4),)
+  aad_magic_squares = ((4, 4, 3, 0),)
+  
+  magical_miracle_sudoku = ( #https://www.youtube.com/watch?v=LuFvoFkqZDA
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, 1, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, 2, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, 4, None, None, None, None, None))
+  magical_miracle_squares = ((4, 4, 3, 2),)
+  
+  fibo_series_two_sudoku = ( #https://www.youtube.com/watch?v=hXiwVVxEH9g
+    (None, None, None, None, 1, None, None, None, None),
+    (1, None, None, None, None, None, None, 3, None),
+    (None, None, None, None, None, 2, None, None, 5),
+    (None, None, None, None, None, None, None, None, None),
+    (None, 2, 1, None, None, None, 8, None, None),
+    (None, None, None, 1, 3, None, None, None, None),
+    (None, None, None, None, None, None, 5, None, None),
+    (None, None, None, None, None, 5, None, None, None),
+    (3, 4, None, None, None, None, None, 8, 9))
+  fibo_series_two_arrows = (
+    ((0, 3), (0, 4), (0, 5)),
+    ((1, 5), (1, 6), (1, 7)),
+    ((2, 0), (2, 1), (2, 2)),
+    ((2, 3), (2, 4), (2, 5)),
+    ((3, 6), (3, 5), (3, 4)),
+    ((5, 0), (4, 0), (3, 0)),
+    ((5, 1), (5, 2), (5, 3)),
+    ((6, 2), (7, 2), (8, 2)),
+    ((7, 8), (7, 7), (7, 6)),
+    ((8, 4), (8, 3), (8, 2)),
+    ((8, 5), (7, 5), (6, 5)))
+    
+  excellence_elegance_sudoku = [[None] * 9 for _ in range(9)]
+  excellence_elegance_arrows = (
+    ((3, 3), (2, 2), (1, 1)),
+    ((3, 5), (2, 6), (1, 7), (0, 8)),
+    ((5, 3), (6, 2), (7, 1), (8, 0)),
+    ((5, 5), (6, 6), (7, 7), (8, 8)))
+  excellence_elegance_sandwich_row_cols = ((20, None, None, 20, 33, None, 0, None, None), (None, None, None, 27, None, 13, None, None, 13))    
+  
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
   #print_border(add_region([[None] * 6 for _ in range(6)], max_region(region_ominos((3, 3), [[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc))[0], 1), prize_sudoku_subsquare_exc)
@@ -1406,7 +1583,6 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(prize_sudoku_subsquare_exc, 6)[0], prize_sudoku_subsquare_exc)
   #print_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[1], exc_from_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[1], nightmare_sudoku_subsquare_exc))
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
-  
   return (
     standard_sudoku(diff_sudoku),
     standard_sudoku(nytimes_hard_sudoku),
@@ -1418,7 +1594,11 @@ def get_ctc_puzzles():
     standard_sudoku(advanced_sudoku),
     standard_sudoku(hardest_sudoku),
     standard_sudoku(extreme_sudoku),
-    knight_thermo_magic_square_sudoku(aad_tribute_sudoku, aad_tribute_thermo, aad_magic_square_centers),
+    arrow_sudoku(fibo_series_two_sudoku, fibo_series_two_arrows, False),
+    sandwich_arrow_sudoku(excellence_elegance_sudoku, excellence_elegance_arrows, True, excellence_elegance_sandwich_row_cols),
+    sandwich_sudoku(slippery_sandwich_sudoku, slippery_sandwich_row_cols),
+    knight_thermo_magic_square_sudoku(aad_tribute_sudoku, aad_tribute_thermo, aad_magic_squares),
+    king_knight_magic_square_sudoku(magical_miracle_sudoku, magical_miracle_squares),
     king_knight_orthagonal_sudoku(miracle_sudoku),
     thermo_sudoku(thermo_app_sudoku, thermo_app_sudoku_thermometers),
     king_sudoku(pi_king_sudoku),
