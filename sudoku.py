@@ -1980,6 +1980,7 @@ def get_impossible_puzzles():
 
 def star_battle_regions(l, battle):
   return (*jigsaw_to_coords(battle).values(), *(row_points(x, 0, l) for x in range(l)), *(column_points(0, x, l) for x in range(l)))
+"""
 def cell_star_battle_rule(rem, battle, points, grouppoints):
   groups = jigsaw_to_coords(battle)
   l = len(rem)
@@ -1987,17 +1988,38 @@ def cell_star_battle_rule(rem, battle, points, grouppoints):
     if 1 in rem[p][q]:
       rem[p][q].remove(1)
   return rem
-def naked_single_star_battle(rem, battle):
+"""
+def naked_single_star_battle(rem, battle, stars, groups):
   l, possible = len(rem), []
   for i in range(l):
     for j in range(l):
       if len(rem[i][j]) == 1 and 1 in rem[i][j]:
+        exclude = []
         for (p, q) in frozenset.union(*king_rule_points(i, j, l)):
           if 1 in rem[p][q]: exclude.append((p, q, 1))
         if len(exclude) != 0: possible.append((exclude, NAKED_SINGLE, ()))
   return possible
-def naked_multiples(rem, battle):
-  pass
+def naked_multiples_star_battle(rem, battle, stars, groups):
+  l, possible = len(rem), []
+  for points in star_battle_regions(l, battle):
+    found = {z for z in points if len(rem[z[0]][z[1]]) == 1 and 1 in rem[z[0]][z[1]]}
+    if len(found) == stars:
+      exclude = []
+      for p in points - found:
+        if 1 in rem[p[0]][p[1]]: exclude.append((p[0], p[1], 1))
+      if len(exclude) != 0: possible.append((exclude, NAKED_SINGLE, ()))
+  return possible
+def hidden_multiples_star_battle(rem, battle, stars, groups):
+  l, possible = len(rem), []
+  for points in star_battle_regions(l, battle):
+    exclusive = {z for z in points if 1 in rem[z[0]][z[1]]}
+    if len(exclusive) == stars:
+      exclude = []
+      for p in exclusive:
+        if 0 in rem[p[0]][p[1]]: exclude.append((p[0], p[1], 0))
+      if len(exclude) != 0: possible.append((exclude, HIDDEN_SINGLE, ()))
+  return possible
+"""
 def check_star_battle_rule(rem, battle):
   l, count = len(rem), 0
   for points in star_battle_regions(l, battle):
@@ -2012,6 +2034,7 @@ def check_star_battle_rule(rem, battle):
       if 0 in rem[exclusive[0][0][0]][exclusive[0][0][1]]: rem[exclusive[0][0][0]][exclusive[0][0][1]].remove(0)
   if count != 0: rem = check_star_battle_rule(rem, battle)
   return rem
+"""
 def get_squares(points):
   regions = []
   for i, j in points:
@@ -2093,19 +2116,22 @@ def get_mutex_regions(points, numstars):
                             #print(len(comb), len(combtrom), len(combdom))
                             combs.append(comb + combtrom + combdom + combddom + tuple(frozenset((x,)) for x in rdd))
   return combs
-def exclude_star_battle(rem, battle, cell_star_battle_remove):
-  stars, l = 2, len(rem)
-  ret = None
-  groups = jigsaw_to_coords(battle)
+def region_space(rem, battle, stars, groups): #internal elimination, for 3 or more stars, this would need to be more complicated a check
+  possible, l = [], len(rem)
   #central squares in region that needs 2 stars and can see all others is eliminated
   for points in groups.values():
     numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in points))
     if numstars == stars or numstars == stars - 1: continue #applies only if 2 or more stars remaining
     rempoints = frozenset(filter(lambda p: len(rem[p[0]][p[1]]) != 1, points))
+    exclude = []
     for i, j in rempoints:
       altpoints = frozenset.union(*king_rule_points(i, j, l))
       if all((x, y) in altpoints for x, y in rempoints - frozenset(((i, j),))):
-        rem, ret = cell_star_battle_remove(rem, i, j, 1), True
+        exclude.append((i, j, 1))
+    if len(exclude) != 0: possible.append((exclude, LOCKED_CANDIDATES, ()))
+  return possible
+def bounded_regions(rem, battle, stars, groups): #row/column elimination
+  possible, l = [], len(rem)
   regions = tuple(tuple(x) for x in standard_sudoku_singoverlap_regions(l))
   for p in range(2, l-1):
     for i in range(l-p+1):
@@ -2115,65 +2141,80 @@ def exclude_star_battle(rem, battle, cell_star_battle_remove):
         tot = frozenset(tuple(battle[x][y] for x, y in regionpoints))
         contained = tuple(x for x in tot if all(p in regionpoints for p in groups[x]))
         if len(contained) == p:
+          exclude = []
           points = set.union(*(groups[x] for x in contained))
           for x, y in regionpoints - points:
-            if 1 in rem[x][y]: rem, ret = cell_star_battle_remove(rem, x, y, 1), True
+            if 1 in rem[x][y]: exclude.append((x, y, 1))
+          if len(exclude) != 0: possible.append((exclude, LOCKED_CANDIDATES, ()))
+        elif len(contained) != 0: pass
+  return possible
+def locked_candidates_star_battle(rem, battle, stars, groups):
+  possible, l = [], len(rem)
+  #jigsaw_visibility = jigsaw_points_gen(groups.values())
   for i in range(l):
     for j in range(l):
-      if len(rem[i][j]) == 2: #equivalent of claiming locked candidates
-        vispoints = frozenset.union(*king_rule_points(i, j, l))
-        altregions = frozenset(tuple(battle[p[0]][p[1]] for p in vispoints)) - frozenset((battle[i][j],))
+      #if (i == 2 or i == 3) and j == 1 or i == 2 and j == 4:
+      #  if 1 in rem[i][j]: possible.append((((i, j, 1),), LOCKED_CANDIDATES, ()))
+      neighborpoints = frozenset.union(*king_rule_points(i, j, l))
+      if len(rem[i][j]) == 2: #external elimination, equivalent of claiming locked candidates
+        altregions = frozenset(tuple(battle[p[0]][p[1]] for p in neighborpoints)) - frozenset((battle[i][j],))
+        exclude = []
+        rowvis, colvis = row_col_points(i, j, l)
         for x in altregions:
-          numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in groups[x]))
+          numstars = sum((1 in rem[z][y] and len(rem[z][y]) == 1 for z, y in groups[x]))
           if numstars == stars or numstars == stars - 1: continue #applies only if 2 or more stars remaining
-          pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints))
-          if len(pts) == 1 or len(pts) == 2 and len(get_dominos(pts)) == 1:
-            #print(i, j, x, tuple(len(rem[p[0]][p[1]]) for p in groups[x] - vispoints), groups[x] - vispoints)
-            rem, ret = cell_star_battle_remove(rem, i, j, 1), True
+          pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - neighborpoints))
+          if len(pts) == 1 or len(pts) == 2 and len(get_dominos(pts)) == 1 or len(pts) == 3 and len(get_trominos(pts)) == 1 or len(pts) == 4 and len(get_squares(pts)) == 1 or set(pts).issubset(rowvis) or set(pts).issubset(colvis):
+            #print(i, j, x, tuple(len(rem[p[0]][p[1]]) for p in groups[x] - neighborpoints), groups[x] - neighborpoints)
+            exclude.append((i, j, 1))
             break
-        for vispoints in (*row_col_points(i, j, l), *jigsaw_points_gen(groups.values())(i, j, l)):
-          numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in vispoints))
-          if numstars != 1: continue
+        if len(exclude) != 0: possible.append((exclude, LOCKED_CANDIDATES, ()))
+        exclude = []
+        for vispoints in row_col_points(i, j, l): #(*row_col_points(i, j, l), *jigsaw_visibility(i, j, l)):
+          numstars = sum((1 in rem[x][y] and len(rem[x][y]) == 1 for x, y in vispoints))
           altregions = frozenset(tuple(battle[p[0]][p[1]] for p in vispoints)) - frozenset((battle[i][j],))
+          if numstars == 0:
+            for x in altregions:
+              numstars = sum((1 in rem[z][y] and len(rem[z][y]) == 1 for z, y in groups[x]))
+              if numstars == stars or numstars == stars - 1: continue #applies only if 2 or more stars remaining
+              pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints - neighborpoints))
+              if len(pts) == 0:
+                exclude.append((i, j, 1))
+                break
+              #elif len(pts) == 1 or len(pts) == 2 and len(get_dominos(pts)) == 1 or len(pts) == 3 and len(get_trominos(pts)) == 1 or len(pts) == 4 and len(get_squares(pts)) == 1:
+              #  for pt in frozenset.intersection(*(frozenset.union(*king_rule_points(i, j, l)) for i, j in vispoints - groups[x] - neighborpoints)):
+              #    if 1 in rem[pt[0]][pt[1]]: exclude.append((pt[0], pt[1], 1))
+          numstars = sum((1 in rem[x][y] and len(rem[x][y]) == 1 for x, y in vispoints))
+          if numstars != 1: continue
           for x in altregions:
-            numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in groups[x]))
+            numstars = sum((1 in rem[z][y] and len(rem[z][y]) == 1 for z, y in groups[x]))
             if numstars == stars or numstars == stars - 1: continue #applies only if 2 or more stars remaining
-            pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints))
-            if len(pts) == 1 or len(pts) == 2 and len(get_dominos(pts)) == 1:
+            pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints - neighborpoints))
+            if len(pts) == 1 or len(pts) == 2 and len(get_dominos(pts)) == 1 or len(pts) == 3 and len(get_trominos(pts)) == 1 or len(pts) == 4 and len(get_squares(pts)) == 1:
               #print(i, j, x, tuple(len(rem[p[0]][p[1]]) for p in groups[x] - vispoints), groups[x] - vispoints)
-              rem, ret = cell_star_battle_remove(rem, i, j, 1), True
+              exclude.append((i, j, 1))
               break
+        if len(exclude) != 0: possible.append((exclude, LOCKED_CANDIDATES, ()))
       elif len(rem[i][j]) == 1 and 1 in rem[i][j]:
+        exclude = []
         for vispoints in row_col_points(i, j, l):
-          numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in vispoints))
+          numstars = sum((1 in rem[x][y] and len(rem[x][y]) == 1 for x, y in vispoints))
           if numstars != 1: continue
           altregions = frozenset(tuple(battle[p[0]][p[1]] for p in vispoints)) - frozenset((battle[i][j],))
           for x in altregions:
-            numstars = sum((1 in rem[i][j] and len(rem[i][j]) == 1 for i, j in groups[x]))
+            numstars = sum((1 in rem[z][y] and len(rem[z][y]) == 1 for z, y in groups[x]))
             if numstars == stars or numstars == stars - 1: continue #applies only if 2 or more stars remaining
-            pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints))
+            pts = tuple(filter(lambda p: len(rem[p[0]][p[1]]) == 2, groups[x] - vispoints - neighborpoints))
             if len(pts) == 1:
               #print(i, j, pts, x, tuple(len(rem[p[0]][p[1]]) for p in groups[x] - vispoints), groups[x] - vispoints)
-              rem, ret = cell_star_battle_remove(rem, pts[0][0], pts[0][1], 0), True
+              exclude.append((pts[0][0], pts[0][1], 0))
               break
-  """
-  for i in groups.keys():
-    points = groups[i]
-    curstars = sum(1 for x in points if len(rem[x[0]][x[1]]) == 1 and next(iter(rem[x[0]][x[1]])) == 1)
-    numstars = stars - curstars
-    points = {x for x in points if len(rem[x[0]][x[1]]) != 1}
-    combs = get_mutex_regions(points, numstars)
-    if combs == stars:
-      if len(combs) != 0:
-        for shape in combs:
-          if len(shape) == 3:
-            pts = tuple(shape)
-            minx, maxx = min(pts, key=lambda p: p[0]), max(pts, key=lambda p: p[0])
-            miny, maxy = min(pts, key=lambda p: p[1]), max(pts, key=lambda p: p[1])
-            for x, y in ((minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)):
-              if not (x, y) in shape: rem, ret = cell_star_battle_remove(rem, x, y, 1), True
-  """
+        if len(exclude) != 0: possible.append((exclude, LOCKED_CANDIDATES, ()))
+  return possible
+def square_reduction(rem, battle, stars, groups):
+  possible, l = [], len(rem)
   #solve by looking at a reduction into squares of the whole grid
+  #totstars = l * stars
   if l & 1 == 0:
     allsquares = all_square_regions(l)
     squaremap = [[set((1,)) if any(len(rem[p[0]][p[1]]) == 1 and 1 in rem[p[0]][p[1]] for p in y) else (set((0,)) if all(len(rem[p[0]][p[1]]) == 1 and 0 in rem[p[0]][p[1]] for p in y) else set((0, 1))) for y in x] for x in allsquares] #if any star, then its a star, if all cannot be a star then no star, otherwise dual values
@@ -2214,20 +2255,43 @@ def exclude_star_battle(rem, battle, cell_star_battle_remove):
                 for z in range(len(allsquares[0])):
                   if not z in x[1]:
                     if 0 in squaremap[z][x[0]]: squaremap[z][x[0]].remove(0)
+    exclude = []
     for i, rc in enumerate(sum(1 for x in s if len(x) == 1) for s in squaremap):
       if rc == 4:
         if all(len(x) == 2 or 1 in x for x in squaremap[i]):
           r = next(iter(j for j, x in enumerate(squaremap[i]) if len(x) == 2))
           for p in allsquares[i][r]:
-            if 1 in rem[p[0]][p[1]]: rem, ret = cell_star_battle_remove(rem, p[0], p[1], 1), True
+            if 1 in rem[p[0]][p[1]]: exclude.append((p[0], p[1], 1))
           squaremap[i][r].remove(1)
     for i, rc in enumerate(sum(1 for j in range(len(squaremap)) if len(squaremap[j][i]) == 1) for i in range(len(squaremap[0]))):
       if rc == 4:
         if all(len(x[i]) == 2 or 1 in x[i] for x in squaremap):
           r = next(iter(j for j, x in enumerate(squaremap) if len(x[i]) == 2))
           for p in allsquares[r][i]:
-            if 1 in rem[p[0]][p[1]]: rem, ret = cell_star_battle_remove(rem, p[0], p[1], 1), True
+            if 1 in rem[p[0]][p[1]]: exclude.append((p[0], p[1], 1))
           squaremap[r][i].remove(1)
+    if len(exclude) != 0: possible.append((exclude, BASIC_FISH, ()))
+  return possible  
+def shape_placement(rem, battle, stars, groups):
+  possible, l = [], len(rem)
+  regions = tuple(tuple(x) for x in standard_sudoku_singoverlap_regions(l))
+  """
+  for i in groups.keys():
+    points = groups[i]
+    curstars = sum(1 for x in points if len(rem[x[0]][x[1]]) == 1 and next(iter(rem[x[0]][x[1]])) == 1)
+    numstars = stars - curstars
+    points = {x for x in points if len(rem[x[0]][x[1]]) != 1}
+    combs = get_mutex_regions(points, numstars)
+    if combs == stars:
+      if len(combs) != 0:
+        for shape in combs:
+          if len(shape) == 3:
+            pts = tuple(shape)
+            minx, maxx = min(pts, key=lambda p: p[0]), max(pts, key=lambda p: p[0])
+            miny, maxy = min(pts, key=lambda p: p[1]), max(pts, key=lambda p: p[1])
+            for x, y in ((minx, miny), (minx, maxy), (maxx, miny), (maxx, maxy)):
+                if not (x, y) in shape: exclude.append((x, y, 1))
+  """
   squarepoints = []
   for i in range(l-1):
     for j in range(l-1): #all combinations of connecting regions up to some length not just 2x2 ones should be considered
@@ -2239,10 +2303,11 @@ def exclude_star_battle(rem, battle, cell_star_battle_remove):
     points = {x for x in points if len(rem[x[0]][x[1]]) != 1}
     combs = get_mutex_regions(points, numstars)
     if len(combs) != 0: #point forcing
+      exclude = []
       p = frozenset(y for x in combs for y in x if len(y) == 1)
       for s in p:
         if all(s in q for q in combs):
-          if 0 in rem[next(iter(s))[0]][next(iter(s))[1]]: rem, ret = cell_star_battle_remove(rem, next(iter(s))[0], next(iter(s))[1], 0), True
+          if 0 in rem[next(iter(s))[0]][next(iter(s))[1]]: exclude.append((next(iter(s))[0], next(iter(s))[1], 0))
       pd = frozenset(y for x in combs for y in x if len(y) == 2)
       pnondiag = {domino for domino in pd if len(frozenset.intersection(*(king_rule_points(pt[0], pt[1], l)[0] for pt in domino))) == 4}
       for shape in pnondiag: #check rows/columns for 1 star and domino exclusion
@@ -2253,25 +2318,26 @@ def exclude_star_battle(rem, battle, cell_star_battle_remove):
             for x in range(l):
               if x != starsonrowcol[0] and x != pts[0][1] and x != pts[1][1]:
                 if 1 in rem[pts[0][0]][x]:
-                  rem, ret = cell_star_battle_remove(rem, pts[0][0], x, 1), True
+                  exclude.append((pts[0][0], x, 1))
         else:
           starsonrowcol = tuple(x for x in range(l) if len(rem[x][pts[0][1]]) == 1 and 1 in rem[x][pts[0][1]])
           if len(starsonrowcol) == 1:
             for x in range(l):
               if x != starsonrowcol[0] and x != pts[0][0] and x != pts[1][0]:
                 if 1 in rem[x][pts[0][1]]:
-                  rem, ret = cell_star_battle_remove(rem, x, pts[0][1], 1), True
-      for shape in pd: #domino exclusions
-        pts = tuple(shape)
-        for x, y in frozenset.intersection(*(z for q in range(len(pts)) for z in king_rule_points(pts[q][0], pts[q][1], l))):
-          if 1 in rem[x][y]:
-            rem, ret = cell_star_battle_remove(rem, x, y, 1), True
+                  exclude.append((x, pts[0][1], 1))
+      if len(exclude) != 0: possible.append((exclude, X_CHAIN, ()))
+      exclude = []
+      if len(pd) != 0: #domino exclusions
+        for x, y in frozenset.union(*(frozenset.intersection(*(z for q in shape for z in king_rule_points(q[0], q[1], l))) for shape in pd)):
+          if 1 in rem[x][y]: exclude.append((x, y, 1))
+      if len(exclude) != 0: possible.append((exclude, X_CHAIN, ()))
+      exclude = []
       pt = frozenset(y for x in combs for y in x if len(y) == 3)
-      for shape in pt: #tromino exclusions
-        pts = tuple(shape)
-        for x, y in frozenset.intersection(*(z for q in range(len(pts)) for z in king_rule_points(pts[q][0], pts[q][1], l))):
-          if 1 in rem[x][y]:
-            rem, ret = cell_star_battle_remove(rem, x, y, 1), True
+      if len(pt) != 0: #tromino exclusions
+        for x, y in frozenset.union(*(frozenset.intersection(*(z for q in shape for z in king_rule_points(q[0], q[1], l))) for shape in pt)):
+          if 1 in rem[x][y]: exclude.append((x, y, 1))
+      if len(exclude) != 0: possible.append((exclude, X_CHAIN, ()))
       def place_stars(mutexes, comb, placements):
         if len(comb) == 0: return [placements] if len(placements) != 0 else []
         allplace = []
@@ -2284,31 +2350,100 @@ def exclude_star_battle(rem, battle, cell_star_battle_remove):
       allplace = []
       for comb in combs: allplace.extend(place_stars(mutexes, comb, []))
       exclusions = frozenset() if len(allplace) == 0 else frozenset.intersection(*(frozenset.union(*(frozenset.union(*king_rule_points(y[0], y[1], l)) for y in x)) for x in allplace))
+      exclude = []
       for x, y in exclusions:
         if 1 in rem[x][y]:
-          rem, ret = cell_star_battle_remove(rem, x, y, 1), True
-  return rem, ret
-def star_battle_loop(rem, battle):
-  def cell_star_battle_remove(rem, i, j, y):
-    if not y in rem[i][j]: return rem
-    rem[i][j].remove(y)
-    return check_star_battle_rule(rem, battle)
+          exclude.append((x, y, 1))
+      if len(exclude) != 0: possible.append((exclude, X_CHAIN, ()))
+      if len(possible) != 0: break
+  return possible
+def x_chain_star_battle(rem, battle, stars, groups):
+  l, possible = len(rem), []
+  jigsaw_visibility = jigsaw_points_gen(groups.values())
+  def x_chain_rcrse(rem, max_depth, chain, exclusions):
+    x, y = chain[-1]
+    if max_depth == len(chain) - 1: return possible
+    exclusions |= frozenset(((x, y),))
+    exclusions |= frozenset.union(*king_rule_points(x, y, l))
+    for points in (*row_col_points(x, y, l), *jigsaw_visibility(x, y, l)):
+      s = [p for p in points if 1 in rem[p[0]][p[1]] and len(rem[p[0]][p[1]]) == 1]
+      if len(s) + len((points | frozenset(((x, y),))).intersection(chain)) == stars:
+        exclusions |= points
+    for points in (*(y for x in standard_sudoku_singoverlap_regions(l) for y in x), *groups.values()):
+      rempoints = frozenset(points) - exclusions
+      if len(rempoints) == 0: continue
+      s = [p for p in rempoints if 1 in rem[p[0]][p[1]] and len(rem[p[0]][p[1]]) == 2]
+      if len(s) == 0: #contradiction
+        print(chain, exclusions, points, rempoints)
+        return False
+      elif len(s) == 1: #forcing link
+        if not x_chain_rcrse(rem, max_depth, chain + [s[0]], exclusions): return False
+    return True
+  for x in range(l):
+    for y in range(l):
+      if len(rem[x][y]) != 1:
+        if not x_chain_rcrse(rem, None, [(x, y)], frozenset()):
+          possible.append((((x, y, 1),), X_CHAIN, ()))
+  return possible
+def exclude_star_battle(rem, battle, stars, groups):
+  for func in (naked_single_star_battle, naked_multiples_star_battle, hidden_multiples_star_battle,
+               region_space, bounded_regions, locked_candidates_star_battle, square_reduction, shape_placement,
+               x_chain_star_battle):
+    possible = func(rem, battle, stars, groups)
+    if len(possible) != 0:
+      #print(logic_step_string(possible[0], mutex_rules))
+      for (x, y, z) in possible[0][0]:
+        if not z in rem[x][y]:
+          print(x, y, z, possible)
+          print_candidate_border(rem, exc_from_border(battle, set()))
+          raise ValueError
+        else: rem[x][y].remove(z)
+      #print_logic_step(possible[0])
+      return rem, possible[0] 
+  return rem, None
+def star_battle_loop(rem, battle, stars):
   solve_path = []
+  groups = jigsaw_to_coords(battle)
   while True:
-    rem, found = exclude_star_battle(rem, battle, cell_star_battle_remove)
-    if any(any(len(y) == 0 for y in x) for x in rem): return None
+    rem, found = exclude_star_battle(rem, battle, stars, groups)
     if found is None: break
     solve_path.append(found)
-  return rem
+    if any(any(len(y) == 0 for y in x) for x in rem): return None, solve_path
+  return rem, solve_path
+
 def solve_star_battle(battle, stars):
   l = len(battle)
   rem = [[set((0, 1)) for _ in range(l)] for _ in range(l)]
   #groups = jigsaw_to_coords(battle)
-  rem = star_battle_loop(rem, battle)
+  rem = star_battle_loop(rem, battle, stars)
   if rem is None: print("Bad Star Battle")
   return rem
 
 def get_star_battles():
+  normal_star_battle = ( #https://www.puzzle-star-battle.com/
+    (1, 2, 2, 2, 2),
+    (1, 1, 3, 4, 4),
+    (1, 1, 3, 4, 4),
+    (1, 1, 5, 4, 4),
+    (1, 1, 5, 5, 4))
+  normal_6x6_star_battle = ( #https://www.puzzle-star-battle.com/?size=1
+    (1, 1, 1, 2, 2, 2),
+    (3, 3, 3, 3, 2, 4),
+    (5, 6, 6, 6, 2, 4),
+    (5, 6, 6, 6, 2, 4),
+    (5, 5, 6, 6, 6, 4),
+    (5, 5, 6, 6, 6, 4))
+  us_puzzle_championship_2019_star_battle = ( #https://www.youtube.com/watch?v=JQQeTht1KxM
+    (1, 1, 1, 1, 2, 2, 2, 2, 2, 2),
+    (1, 1, 1, 2, 2, 2, 2, 3, 2, 2),
+    (1, 1, 3, 3, 3, 3, 3, 3, 4, 4),
+    (1, 1, 3, 5, 5, 5, 5, 3, 5, 4),
+    (1, 6, 6, 6, 7, 7, 5, 5, 5, 4),
+    (1, 8, 6, 7, 7, 7, 7, 7, 5, 4),
+    (1, 8, 6, 7, 7, 7, 7, 5, 5, 4),
+    (1, 8, 6, 7, 7, 9, 9, 5, 10, 4),
+    (8, 8, 6, 9, 7, 9, 9, 10, 10, 10),
+    (8, 8, 6, 9, 9, 9, 9, 9, 10, 10))
   lm_star_battle = ( #https://logicmastersindia.com/forum/forums/thread-view.asp?tid=140
     (1, 1, 1, 1, 2, 2, 2, 2, 2),
     (1, 1, 2, 2, 2, 2, 3, 2, 2),
@@ -2341,7 +2476,10 @@ def get_star_battles():
    (8, 7, 7, 7, 4, 4, 4, 5, 10, 9),
    (8, 7, 8, 7, 10, 10, 10, 10, 10, 9),
    (8, 8, 8, 10, 10, 9, 9, 9, 9, 9))
-  return ((lm_star_battle, 2),
+  return ((normal_star_battle, 1),
+          (normal_6x6_star_battle, 1),
+          (us_puzzle_championship_2019_star_battle, 2),
+          (lm_star_battle, 2),
           (easier_star_battle, 2),
           (perfect_star_battle, 2),)
 def valid_star_battle(rem, battle, stars):
@@ -2354,7 +2492,8 @@ def valid_star_battle(rem, battle, stars):
   return rem, True
 def check_star_battle(battle):
   l = len(battle[0])
-  rem, valid = valid_star_battle(solve_star_battle(battle[0], battle[1]), battle[0], battle[1])
+  rem, solve_path = solve_star_battle(battle[0], battle[1])
+  rem, valid = valid_star_battle(rem, battle[0], battle[1])
   if not rem is None:
     print_border(rem, exc_from_border(battle[0], set()))
     if not valid:
