@@ -117,9 +117,9 @@ def check_bad_sudoku(rem):
   return False
 LAST_DIGIT,FULL_HOUSE,NAKED_SINGLE,HIDDEN_SINGLE,LOCKED_CANDIDATES,NAKED_MULTIPLES,HIDDEN_MULTIPLES,BASIC_FISH,FINNED_FISH,X_CHAIN,XY_CHAIN=0,1,2,3,4,5,6,7,8,9,10
 X_CHAIN_SKYSCRAPER,X_CHAIN_TWOSTRINGKITE,X_CHAIN_TURBOT_FISH=0,1,2
-KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE,SANDWICH_RULE,ARROW_RULE,EVEN_ODD,MIRROR_RULE,SYMMETRY_RULE,BATTLEFIELD_RULE,RENBAN_RULE,IN_ORDER_RULE,JOUSTING_KNIGHTS=11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26
+KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE,SANDWICH_RULE,ARROW_RULE,EVEN_ODD,MIRROR_RULE,SYMMETRY_RULE,BATTLEFIELD_RULE,RENBAN_RULE,IN_ORDER_RULE,JOUSTING_KNIGHTS,FIBONACCI_RULE=11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
 STRING_RULES = ("Last Digit", "Full House", "Naked Single", "Hidden Single", "Locked Candidates", "Naked %s", "Hidden %s", "Basic %s", "Finned %s", "X-Chain", "XY-Chain",
-                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square", "Sandwich Rule", "Arrow Rule", "Even or Odd Rule", "Mirror Rule", "Symmetry Rule", "Battlefield Rule", "Renban Rule", "In Order Rule", "Jousting Knights")
+                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square", "Sandwich Rule", "Arrow Rule", "Even or Odd Rule", "Mirror Rule", "Symmetry Rule", "Battlefield Rule", "Renban Rule", "In Order Rule", "Jousting Knights", "Fibonacci Rule")
 def naked_single(rem, mutex_rules, cell_visibility_rules, value_set, dynamic_visibility=None):
   l, possible = len(rem), []
   #should find the full houses before naked singles followed by hidden singles
@@ -1394,32 +1394,43 @@ def exclude_battlefield_rule_gen(fields):
       if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
     return possible
   return exclude_battlefield_rule
-def exclude_renban_rule_gen(cages, renban=True):
+def exclude_renban_rule_gen(cages):
   def exclude_renban_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
-    for cells in cages:
-      possibles = [set() for _ in cells]
-      common = value_set.copy()
-      for prod in itertools.product(*[rem[pt[0]][pt[1]] for pt in cells]): #such complexity is not required
-        if len(set(prod)) == len(cells) and not (renban ^ (max(prod) - min(prod) + 1 == len(cells))):
-          common = common.intersection(prod)
+    for cagesets in cages:
+      allprods, allcommon, allposs = [], [], []
+      for renban, cells in cagesets:
+        prods = []
+        common = value_set.copy()
+        for prod in itertools.product(*[rem[pt[0]][pt[1]] for pt in cells]): #such complexity is not required
+          if len(set(prod)) == len(cells) and not (renban ^ (max(prod) - min(prod) + 1 == len(cells))):
+            common = common.intersection(prod)
+            prods.append(prod)
+        allprods.append(prods); allcommon.append(common)
+      if len(allprods) != 1: allprods = [list(filter(lambda seq: all(any(len(set(seq).intersection(y)) == 0 for y in z) for z in allprods[:i] + allprods[i+1:]), x)) for i, x in enumerate(allprods)]
+      for k, prods in enumerate(allprods):
+        possibles = [set() for _ in cagesets[k][1]]
+        for prod in prods:
           for i, x in enumerate(prod):
             possibles[i].add(x)
+        allposs.append(possibles)
       exclude = []
-      for i, pt in enumerate(cells):
-        for y in rem[pt[0]][pt[1]].difference(possibles[i]):
-          exclude.append((pt[0], pt[1], y))
+      for k, (_, cells) in enumerate(cagesets):
+        for i, pt in enumerate(cells):
+          for y in rem[pt[0]][pt[1]].difference(allposs[k][i]):
+            exclude.append((pt[0], pt[1], y))
       if len(exclude) != 0: possible.append((exclude, RENBAN_RULE, ()))      
-      for c in common:
-        commonpts = [pt for pt in cells if c in rem[pt[0]][pt[1]]]
-        for regions in mutex_rules:
-          for region in regions:
-            if len(region.intersection(commonpts)) == len(commonpts):
-              exclude = []
-              for cell in region.difference(commonpts):
-                if c in rem[cell[0]][cell[1]]:
-                  exclude.append((cell[0], cell[1], c))
-              if len(exclude) != 0: possible.append((exclude, RENBAN_RULE, ()))
+      for k, (_, cells) in enumerate(cagesets):
+        for c in allcommon[k]:
+          commonpts = [pt for pt in cells if c in rem[pt[0]][pt[1]]]
+          for regions in mutex_rules:
+            for region in regions:
+              if len(region.intersection(commonpts)) == len(commonpts):
+                exclude = []
+                for cell in region.difference(commonpts):
+                  if c in rem[cell[0]][cell[1]]:
+                    exclude.append((cell[0], cell[1], c))
+                if len(exclude) != 0: possible.append((exclude, RENBAN_RULE, ()))
     return possible
   return exclude_renban_rule
 def exclude_in_order_rule_gen(clues):
@@ -1580,6 +1591,87 @@ def exclude_jousting_knights_rule_gen(exclusions, exc_digits):
     #possible.extend(x_chain(rem, mutex_rules, cell_visibility_rules, value_set, 4, knight_exclusion_visibility))
     return possible
   return exclude_jousting_knights_rule
+def get_fibonacci_num(n, x = (1, 1)):
+  #(((1+sqrt(5))/2)^n-((1-sqrt(5))/2)^n)/sqrt(5)
+  #((1+sqrt(5))^n-(1-sqrt(5))^n)/(2^n*sqrt(5) - sqrt(5) is just a place held by a variable e.g. x since it must cancel
+  if n <= 0: raise ValueError
+  a, b, c, d = 1, 1, 1, -1
+  e, f, g, h = 1, 0, 1, 0
+  exp = n
+  while exp > 1:
+    if (exp & 1) != 0:
+      e, f = a * e + b * f * 5, a * f + e * b
+      g, h = c * g + d * h * 5, c * h + g * d
+    a, b = a * a + b * b * 5, (a * b) << 1
+    c, d = c * c + d * d * 5, (c * d) << 1
+    exp >>= 1
+  a, b = a * e + b * f * 5, a * f + e * b
+  c, d = c * g + d * h * 5, c * h + g * d
+  #if a != c: raise ValueError
+  if x != (1, 1): return ((b - d) >> n) * x[0] + ((a - b) >> n) * x[1]
+  return (b - d) >> n
+def get_fibonacci_num_matrix(n, x = (1, 1)):
+  import numpy as np
+  if n <= 0: raise ValueError
+  mat = np.array(((1, 1), (1, 0)))
+  y = np.array(((1, 0), (0, 1)))
+  while n > 1:
+    if (n & 1) != 0: y = mat.dot(y)
+    mat = mat.dot(mat)
+    n >>= 1
+  if x != (1, 1): return mat.dot(y).dot(np.array(x))[1]
+  return mat.dot(y)[0, 1]
+def gen_fibonacci_seqs(set1, set2, max_digits):
+  seqs = []
+  for x in set1:
+    for y in set2:
+      seq, num1, num2 = [x], x, y
+      while True:
+        digits, val = [], num2
+        while val != 0:
+          digits.append(val % 10)
+          val //= 10
+        if 0 in digits: break
+        seq.extend(reversed(digits))
+        if len(seq) == max_digits: seqs.append(seq)
+        if len(seq) >= max_digits: break
+        num1, num2 = num2, num1 + num2
+  return seqs
+def gen_fibonacci_sets_seqs(sets):
+  seqs = []
+  for x in sets[0]:
+    for y in sets[1]:
+      seq, num1, num2 = [x], x, y
+      while True:
+        digits, val = [], num2
+        while val != 0:
+          digits.append(val % 10)
+          val //= 10
+        if len(sets) < len(seq) + len(digits): break
+        if any(not d in sets[len(seq)+i] for i, d in enumerate(reversed(digits))): break
+        seq.extend(reversed(digits))
+        if len(seq) == len(sets): seqs.append(seq); break
+        num1, num2 = num2, num1 + num2
+  return seqs
+def exclude_fibonacci_rule_gen(cages):
+  def exclude_fibonacci_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+    l, possible = len(rem), []
+    for start, cage in cages:
+      vals = [rem[pt[0]][pt[1]] for pt in cage]
+      allseqs = []
+      for j in (0,) if start else range(len(cage)):
+        seqs = gen_fibonacci_sets_seqs(vals[j:] + vals[:j])
+        for i, pt in enumerate(cage):
+          intsct = cell_visibility(pt[0], pt[1], l, cell_visibility_rules).intersection(cage)
+          seqs = list(filter(lambda s: all(s[i] != s[x] for x in [cage.index(y) for y in intsct]), seqs))
+        allseqs.extend([s[-j:] + s[:-j] for s in seqs])
+      exclude = []
+      for i, pt in enumerate(cage):
+        for y in rem[pt[0]][pt[1]] - set(s[i] for s in allseqs):
+          exclude.append((pt[0], pt[1], y))
+      if len(exclude) != 0: possible.append((exclude, FIBONACCI_RULE, ()))
+    return possible
+  return exclude_fibonacci_rule
 def exclude_mirror_gen(mirrors):
   def exclude_mirror(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
@@ -1697,6 +1789,10 @@ def jigsaw_sudoku(puzzle, jigsaw):
 def thermo_sudoku(puzzle, thermo):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def thermo_sandwich_sudoku(puzzle, sandwich_row_cols, thermo):
+  l = len(puzzle)
+  sandwiches = [(x, row_points(i, 0, l)) for i, x in enumerate(sandwich_row_cols[0]) if not x is None] + [(x, column_points(0, i, l)) for i, x in enumerate(sandwich_row_cols[1]) if not x is None]
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_sandwich_rule_gen(sandwiches),exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
 def thermo_sudoku_symmetry(puzzle, thermo):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_thermo_rule_gen(thermo),exclude_symmetry), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))  
@@ -1777,11 +1873,18 @@ def renban_killer_sudoku(puzzle, cages, evens):
   l = len(puzzle) #exclude_cage_mirror_rule_gen(cages)
   value_set = frozenset(range(1, l+1))
   killer = [(renban_killer_clue_combos(x, len(y), value_set, renban), y) for renban, x, y in cages if x != '']
-  renbans = [y for renban, x, y in cages if renban and x == '']
-  notrenbans = [y for renban, x, y in cages if not renban and x == '']
+  renbans = [[(renban, y)] for renban, x, y in cages if x == '']
   jigcages = [y for _, _, y in cages]
+  mutex_rules = standard_sudoku_mutex_regions(l)
+  combined_renban = []
+  for regions in mutex_rules:
+    for region in regions:
+      for comb in itertools.combinations(cages, 2):
+        combined = frozenset.union(*(frozenset(y) for _, _, y in comb))
+        if len(region.intersection(combined)) == len(combined):
+          renbans.append([(renban, y) for renban, _, y in comb])
   #excluded = frozenset(itertools.product(range(l), range(l))) - frozenset.union(*(frozenset(y) for _, y in cages))
-  return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for _, x, y in cages]),), (exclude_even_odd_gen(evens, True), exclude_renban_rule_gen(renbans), exclude_renban_rule_gen(notrenbans, False), exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen(jigcages),), value_set, None,
+  return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for _, x, y in cages]),), (exclude_even_odd_gen(evens, True), exclude_renban_rule_gen(renbans), exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen(jigcages),), value_set, None,
           (lambda x: print_border(x, exc_from_border(cages_to_jigsaw(jigcages, l), set())), lambda x: print_candidate_border(x, exc_from_border(cages_to_jigsaw(jigcages, l), set()))))  
 def in_order_sudoku(puzzle, clues):
   l = len(puzzle)
@@ -1842,7 +1945,10 @@ def knight_killer_cages_even_mirror_magic_square_sudoku(puzzle, killer_cages, ma
   killers = [magic_square_center_to_killer_cages(x, frozenset(range(1, l+1))) for x in ms]
   mirrors = tuple(zip(*(sorted(get_sub_square_points(sub_square_from_point(m[0], m[1], l), l)) for x in mirror_sub_squares for m in x)))
   return (puzzle, standard_sudoku_mutex_regions(l), (knight_rule_points,mirror_visibility_gen(mirrors, standard_sudoku_mutex_regions(l), (knight_rule_points,))), (exclude_magic_square_rule_gen(ms), *(exclude_killer_rule_gen(killer) for killer in killers), exclude_killer_rule_gen(killer_cages), exclude_even_odd_gen(evens, True), exclude_mirror_gen(mirrors)), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
-  
+def fibonacci_rule_sudoku(puzzle, cages):
+  l = len(puzzle)
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_fibonacci_rule_gen(cages),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+
 def file_puzzles(filename):
   with open(filename) as f:
     return [standard_sudoku(str_to_sudoku(x.strip())) for x in f.readlines() if len(x) == 9 * 9 + 1]
@@ -2340,6 +2446,38 @@ def get_ctc_puzzles():
     (False, '', ((8, 2), (8, 3), (8, 4))),
     (True, 'O?', ((8, 6), (8, 7), (8, 8))))
   
+  fibonacci_rule_puzzle = ( #https://www.youtube.com/watch?v=802_r7rBYms
+    (None, None, None, None, None, None, None, None, None),
+    (1, None, None, None, 2, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, 3, None, None, None, None, None),
+    (None, None, None, None, None, 5, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, 8, None),
+    (None, None, None, None, None, None, None, None, None),
+    (4, None, None, None, None, None, 1, 3, None))
+  fibonacci_rule_puzzle_cages = (
+    (True, ((2, 2), (1, 3), (0, 4), (1, 5), (2, 6), (3, 7), (4, 8), (5, 7), (6, 6), (7, 5), (8, 4), (7, 3), (6, 2), (5, 1), (4, 0))),
+    (False, ((3, 2), (4, 3), (5, 4), (6, 3), (7, 2), (6, 1), (5, 0), (4, 1))))
+  
+  thermo_sandwich_puzzle = ( #https://www.youtube.com/watch?v=hSo8KlQoovU
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, 9, None, None, None, 1, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None))
+    
+  thermo_sandwich_puzzle_sandwiches = ((None, None, 15, None, 7, None, None, None, 7), (9, None, 3, None, 20, None, 11, None, None))
+  thermo_sandwich_puzzle_thermos = (
+    ((0, 4), (1, 4), (1, 5), (1, 6), (2, 6), (3, 6)),
+    ((3, 4), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (3, 8)),
+    ((5, 1), (4, 1), (3, 1)),
+    ((6, 7), (7, 7), (8, 7)))
+  
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
   #print_border(add_region([[None] * 6 for _ in range(6)], max_region(region_ominos((3, 3), [[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc))[0], 1), prize_sudoku_subsquare_exc)
@@ -2348,7 +2486,8 @@ def get_ctc_puzzles():
   #print_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[1], exc_from_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[1], nightmare_sudoku_subsquare_exc))
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
-  return (renban_killer_sudoku(tight_logic_mean_killer_sudoku, tight_logic_mean_killer_sudoku_cages, ((8, 7),)),
+  return (
+    thermo_sandwich_sudoku(thermo_sandwich_puzzle, thermo_sandwich_puzzle_sandwiches, thermo_sandwich_puzzle_thermos),
     knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),)
   return (
     standard_sudoku(diff_sudoku),
@@ -2370,11 +2509,13 @@ def get_ctc_puzzles():
     king_knight_magic_square_sudoku(magical_miracle_sudoku, magical_miracle_squares),
     king_knight_orthagonal_sudoku(miracle_sudoku),
     jousting_knights_sudoku(jousting_knights_puzzle, jousting_knights_exclusions, set((5,))),
+    fibonacci_rule_sudoku(fibonacci_rule_puzzle, fibonacci_rule_puzzle_cages),
     thermo_sudoku(thermo_app_sudoku, thermo_app_sudoku_thermometers),
     thermo_sudoku(miracle_man_thermo_sudoku, miracle_man_thermos),
     thermo_sudoku(face_channel_thermo_sudoku, face_channel_thermo_sudoku_thermos),
     thermo_sudoku_symmetry(minimalist_sudoku, minimalist_thermos),
     renban_sudoku(renban_puzzle, renban_puzzle_contigs),
+    renban_killer_sudoku(tight_logic_mean_killer_sudoku, tight_logic_mean_killer_sudoku_cages, ((8, 7),)),
     in_order_sudoku(clever_type_sudoku, clever_type_sudoku_values),
     king_sudoku(pi_king_sudoku),
     king_sudoku(king_knight_queen_sudoku),
