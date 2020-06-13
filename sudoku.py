@@ -1571,7 +1571,9 @@ def exclude_battlefield_rule_gen(fields):
   def exclude_battlefield_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
     tot, mx = sum(value_set), max(value_set)
+    fieldsums = []
     for val, points in fields:
+      fieldsums.append(set())
       contig = tuple(sorted(points))
       start, stop = contig[0], contig[-1]
       possibles = [set() for _ in range(l)]
@@ -1581,6 +1583,7 @@ def exclude_battlefield_rule_gen(fields):
           if val == 0:
             possibles[0].add(s)
             possibles[-1].add(p)
+            fieldsums[-1].add(s + p)
           continue
         startidx, endidx = (s - (1 if s == mx else 0), l-p + (1 if p == mx else 0)) if s + p <= l else (l-p + (1 if p == mx else 0), s - (1 if s == mx else 0)) #gap vs. overlap
         respts = [rem[pt[0]][pt[1]] for pt in contig[startidx:endidx]]
@@ -1593,6 +1596,7 @@ def exclude_battlefield_rule_gen(fields):
         if (len(res) != 0 or len(respts) == 0) and (len(remres) != 0 or len(rempts) == 0):
           possibles[0].add(s)
           possibles[-1].add(p)
+          fieldsums[-1].add(s + p)
           for y in res:
             for i in range(startidx, endidx):
               possibles[i].add(y[i-startidx])
@@ -1601,8 +1605,28 @@ def exclude_battlefield_rule_gen(fields):
               possibles[i + (1 if i < startidx - 1 else endidx - startidx + 1)].add(y[i])
       exclude = []
       for i, pt in enumerate(contig):
+        if val == 0 and not i in (0, len(contig)-1): continue
         for y in rem[pt[0]][pt[1]].difference(possibles[i]):
           exclude.append((pt[0], pt[1], y))
+      if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
+    for indexes in get_mutex_cages([y for _, y in fields])[l-1]: #length l mutually exclusive regions
+      fieldset = [fields[i] for i in indexes]
+      fieldsetsums = [fieldsums[i] for i in indexes]
+      allposs = [[set(), set()] for _ in fieldset]
+      for sums in get_all_mutex_digit_group_sum(tot << 1, [1 for _ in range(l)], fieldsetsums):
+        for i, (val, points) in enumerate(fieldset):
+          contig = tuple(sorted(points))
+          start, stop = contig[0], contig[-1]
+          for s, p in itertools.product(rem[start[0]][start[1]], rem[stop[0]][stop[1]]):
+            if s == p: continue
+            if s + p == sums[i]:
+              allposs[i][0].add(s); allposs[i][-1].add(p)
+      exclude = []
+      for i, (val, points) in enumerate(fieldset):
+        contig = tuple(sorted(points))
+        for j, pt in enumerate((contig[0], contig[-1])):
+          for y in rem[pt[0]][pt[1]].difference(allposs[i][j]):
+            exclude.append((pt[0], pt[1], y))
       if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
     return possible
   return exclude_battlefield_rule
@@ -3016,6 +3040,12 @@ def get_ctc_puzzles():
     (None, 'O', 'S', None, None, None, None, None),
     (None, None, None, None, None, 'E', 'S', None))
     
+  border_skirmish_puzzle = ((None,) * 9,) * 9 #https://www.youtube.com/watch?v=YoKizMhyjGU
+  border_skirmish_sudoku_overgaps = (
+    (2, 2, 0, 1, 2, 1, 1, 1, 8),
+    (9, 0, 0, 7, 0, 0, 8, 7, 0)
+  )    
+    
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
   #print_border(add_region([[None] * 6 for _ in range(6)], max_region(region_ominos((3, 3), [[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc))[0], 1), prize_sudoku_subsquare_exc)
@@ -3046,6 +3076,7 @@ def get_ctc_puzzles():
     sandwich_arrow_sudoku(excellence_elegance_sudoku, excellence_elegance_arrows, True, excellence_elegance_sandwich_row_cols),
     sandwich_sudoku(slippery_sandwich_sudoku, slippery_sandwich_row_cols),
     battlefield_sudoku(battlefield_puzzle, battlefield_sudoku_overgaps),
+    battlefield_sudoku(border_skirmish_puzzle, border_skirmish_sudoku_overgaps),
     knight_thermo_magic_square_sudoku(aad_tribute_sudoku, aad_tribute_thermo, aad_magic_squares),
     king_knight_magic_square_sudoku(magical_miracle_sudoku, magical_miracle_squares),
     king_knight_orthagonal_sudoku(miracle_sudoku),
