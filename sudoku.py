@@ -1101,7 +1101,7 @@ def num_combs(total, digits, value_set):
     #multiply by 1+tx^v or ((1, v):1) then sum them - multiply by one is trivial
     multipoly = add_multipoly(multipoly, mul_multipoly(multipoly, {(1, v):1}, 2))
   return multipoly[(digits, total)] if (digits, total) in multipoly else None
-def num_multi_cage_combs(total, digit_vals, value_set):
+def num_multi_cage_combs(total, digit_vals, value_set): #does not handle dependencies
   #the number of ways to make a sum of m in cages of n and p cells is the coefficient of t^n u^p x^m in the expansion of the polynomial (1 + tx) (1 + tx^2) ... (1 + tx^9)(1 + ux) (1 + ux^2) ... (1 + ux^9)
   l = len(digit_vals)
   finpoly = None
@@ -1113,15 +1113,54 @@ def num_multi_cage_combs(total, digit_vals, value_set):
     n = {(*(k[0] if i == j else 0 for j in range(l)), k[-1]):val for k, val in multipoly.items() if k[0] == digits}
     finpoly = n if finpoly is None else mul_multipoly(finpoly, n, l + 1)
   return finpoly[(*digit_vals, total)] if (*digit_vals, total) in finpoly else None
-  """
-  multipoly = {(0,) * (l + 1):1} #(n, m):(a, b) of a*t^n*x^m
-  for i in range(l):
-    coeff = tuple(1 if i == j else 0 for j in range(l))
-    for v in sorted(value_set):
+def num_multi_cage_combs_sets(total, digit_vals, value_sets): #does not handle dependencies
+  #the number of ways to make a sum of m in cages of n and p cells is the coefficient of t^n u^p x^m in the expansion of the polynomial (1 + tx) (1 + tx^2) ... (1 + tx^9)(1 + ux) (1 + ux^2) ... (1 + ux^9)
+  l = len(digit_vals)
+  finpoly = None
+  for i, digits in enumerate(digit_vals):
+    multipoly = {(0, 0):1} #(n, m):(a, b) of a*t^n*x^m
+    for v in sorted(value_sets[i]):
       #multiply by 1+tx^v or ((1, v):1) then sum them - multiply by one is trivial
-      multipoly = add_multipoly(multipoly, mul_multipoly(multipoly, {(*coeff, v):1}, l + 1))
-  return multipoly[(*digit_vals, total)] if (*digit_vals, total) in multipoly else None
-  """
+      multipoly = add_multipoly(multipoly, mul_multipoly(multipoly, {(1, v):1}, 2))
+    n = {(*(k[0] if i == j else 0 for j in range(l)), k[-1]):val for k, val in multipoly.items() if k[0] == digits}
+    finpoly = n if finpoly is None else mul_multipoly(finpoly, n, l + 1)
+  return finpoly[(*digit_vals, total)] if (*digit_vals, total) in finpoly else None
+def multi_cage_sums(total, digit_vals, value_set):
+  #in this case with a single value set the min and max is trivial and does not require a complicated routine...
+  mins, maxes = [min_sum_efficient([set(value_set) for _ in d]) for d in digit_vals if len(d) != 0], [max_sum_efficient([set(value_set) for _ in d]) for d in digit_vals if len(d) != 0]
+  minmaxes = [None if (mn, mx) == (None, None) else set(range(mn[0], mx[0]+1)) for mn, mx in zip(mins, maxes)]  
+  def multi_cage_sums_inner(totals, digit_vals, value_sets):
+    if len(totals) == 0: return []
+    combs = get_all_mutex_digit_sum(totals[0], len(digit_vals[0]), value_sets[0])
+    groupdep = {}
+    for i, d in enumerate(digit_vals[0]):
+      for x in d:
+        if not x-1 in groupdep: groupdep[x-1] = [i]
+        else: groupdep[x-1].append(i)
+    perms = []
+    for c in combs:
+      for p in itertools.permutations(c):
+        inner = multi_cage_sums_inner(totals[1:], digit_vals[1:], [vs.difference({p[x] for x in groupdep[i]}) if i in groupdep else vs for i, vs in enumerate(value_sets[1:])])        
+        if not inner is None:
+          if len(inner) == 0: perms.append(p)
+          else: perms.extend([(*p, *i) for i in inner])
+    return perms if len(perms) != 0 else None
+  combs = []
+  for totals in get_all_mutex_digit_group_sum(total, [1 for _ in minmaxes], minmaxes):
+    inner = multi_cage_sums_inner(totals, [d for d in digit_vals if len(d) != 0], [value_set for d in digit_vals if len(d) != 0])
+    if not inner is None: combs.extend(inner)
+  sumsets = [set() for _ in digit_vals]
+  for c in combs:
+    idx = 0
+    sumset = [0 for _ in digit_vals]
+    for i, d in enumerate(digit_vals):
+      for x in d:
+        sumset[i] += c[idx]
+        for dep in x:
+          sumset[i+dep] += c[idx]
+        idx += 1
+    for i, s in enumerate(sumset): sumsets[i].add(s)
+  return sumsets
 def get_all_mutex_digit_sum(total, digits, value_set):
   combs = []
   for comb in itertools.combinations(value_set, digits):
@@ -1167,6 +1206,21 @@ def find_dep_min_sum():
     mneff = min_sum_efficient(z)
     if mn != mneff: print(mn, mneff, z)
 
+def find_sum_efficient(total, value_sets):
+  combs = []
+  for comb in itertools.combinations(sorted(set.union(*value_sets)), len(value_sets)):
+    if sum(comb) != total: continue
+    v = list(vs.intersection(comb) for vs in value_sets)
+    #now if any 1 has 0 values continue
+    if any(len(vs) == 0 for vs in v): continue
+    for p in range(2, len(value_sets)):
+      for c in itertools.combinations(v, p):
+        if len(set.union(*c)) < p: #any p of the sets together have less than p values
+          break
+      else: continue
+      break
+    else: combs.append(comb)
+  return combs
 def min_sum_efficient(value_sets):
   for comb in itertools.combinations(sorted(set.union(*value_sets)), len(value_sets)):
     v = list(vs.intersection(comb) for vs in value_sets)
@@ -1247,21 +1301,41 @@ def get_mutex_cells(cells, cell_visibility_rules, l): #now supporting non-transi
     if x == 0:
       groups = [set((c,))]
       continue
-    g = list(filter(lambda z: len(z.intersection(vis[x])) == len(z), groups))
+    g = list(filter(lambda z: len(z.intersection(vis[x])) != 0, groups))
     if len(g) == 0:
-      g = list(filter(lambda z: len(z.intersection(vis[x])) != 0, groups))
-      if len(g) == 0:
-        groups.append(set((c,)))
-      else:
-        for gx in g: groups.append(gx.intersection(vis[x]) | set((c,)))
-      #groups.append(set((c,)))
-    #elif len(g) == 1: g[0].add(c)
+      groups.append(set((c,)))
     else:
-      for gx in g: gx.add(c)
+      for gx in g:
+        if len(gx.intersection(vis[x])) == len(gx):
+          gx.add(c)
+      for gx in g:
+        if len(gx.intersection(vis[x])) != len(gx):
+          newgroup = gx.intersection(vis[x]) | set((c,))
+          for gr in groups:
+            if gr.issubset(newgroup): groups.remove(gr)
+          if not any(newgroup.issubset(gr) for gr in groups): groups.append(newgroup)
   return sorted(groups, key=lambda g: len(g), reverse=True)
-def get_mutex_groups_min_dependent(groups):
-  groupcand = groups.copy()
-  for i, g in enumerate(groupcand):
+#https://en.wikipedia.org/wiki/Topological_sorting
+def topological_sort_groups(groups): #dont need to care about circular dependencies
+  unmarked, marked, tempmark, res = groups.copy(), [], [], []
+  def visit(g, res):
+    if g in marked: return
+    if g in tempmark: return #cycle
+    tempmark.append(g)
+    unmarked.remove(g)
+    for gn in groups:
+      if len(g.intersection(gn)) != 0:
+        visit(gn, res)
+    tempmark.remove(g)
+    marked.append(g)
+    res.insert(0, g)
+  while len(unmarked) != 0:
+    visit(unmarked[0], res)
+  return res
+def get_mutex_groups_min_dependent(groups): #this is a graph problem...
+  groupcand = topological_sort_groups([g.copy() for g in groups])
+  #must first define a correct dependency ordering where dependents immediately go after but requires topoligical sorting
+  for i, g in enumerate(groupcand): #must enumerate in dependency order...
     dependents = []
     for p in g:
       forwards = []
@@ -2062,7 +2136,7 @@ def get_mutex_cages(cages): #n^2 instead of combinatorics 2^n
   for i, c in enumerate(cages):
     pairdict[i] = set()
     for j, cj in enumerate(cages[i+1:]):
-      if len(set(c[1]).intersection(cj[1])) == 0:
+      if len(set(c).intersection(cj)) == 0:
         multiples[1].add((i, i+1+j))
         pairdict[i].add(i+1+j)
   for l in range(3, len(cages) + 1):
@@ -2074,55 +2148,46 @@ def best_killer_cages(killer, mutex_rules, value_set):
   l = len(value_set)
   tot = sum(value_set)
   cf = combination_freedom_gen(mutex_rules, value_set, l)
-  genkiller, gencf = list(killer), {x: cf(x)[0] for x in killer}
-  print(gencf)
-  for rs in range(1, 4):
+  genkiller, gencf, combinedkiller = list(killer), {x: cf(x)[0] for x in killer}, []
+  while True:
     nextkiller = []
-    print(rs, len(genkiller))
-    for regions in mutex_rules:
-      for region in itertools.combinations(regions, rs):
-        allregion = frozenset.union(*region)
-        intsct = [(x, y) for x, y in genkiller if len(allregion.intersection(y)) != 0]
-        #print(len(genkiller), genkiller)
-        #for p in range(1, len(intsct)+1):
-        #  for j in itertools.combinations(intsct, p):
-        for p in get_mutex_cages(intsct):
-          for jp in p:
-            j = [intsct[j] for j in jp]
-            combined = frozenset.union(*(frozenset(q[1]) for q in j))
-            #if len(combined) != sum(len(k[1]) for k in j): continue #no overlaps
-            if any(len(r.intersection(combined)) == 0 for r in region): continue
-            cfgroup = sum(gencf[x] for x in j)
+    for p in get_mutex_cages([y for _, y in genkiller]):
+      for jp in p:
+        j = [genkiller[j] for j in jp]
+        combined = frozenset.union(*(frozenset(q[1]) for q in j))
+        #if len(combined) != sum(len(k[1]) for k in j): continue #no overlaps
+        #if any(len(r.intersection(combined)) == 0 for r in region): continue
+        cfgroup = sum(gencf[x] for x in j)        
+        #mutexregions = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) != 0] #only rows/rows (always), rows/houses (sometimes), columns/columns (always), columns/houses (sometimes) are mutually exclusive
+        if not any(len(r.intersection(combined)) == len(r) for rg in mutex_rules for r in rg): #no extras
+          for regions in mutex_rules:
+            region = [r for r in regions if len(r.intersection(combined)) != 0]
+            allregion = frozenset.union(*region)
             if len(allregion.intersection(combined)) == len(combined) and len(combined) != len(allregion):
-              extras = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) == len(r)]
-              if len(extras) == 0:
-                newregion = (tot * rs - sum(x for x, _ in j), tuple(allregion.difference(combined)))
+              newreg = allregion.difference(combined)
+              newregion = (tot * len(region) - sum(x for x, _ in j), tuple(newreg))
+              if not any(len(newreg.intersection(r)) == len(r) for _, r in genkiller): #no subsuming or repeated regions
                 newcf = cf(newregion)[0]
                 if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
+                  print(newregion, newcf)
                   nextkiller.append(newregion); gencf[newregion] = newcf
-            extras = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) == len(r)] #only rows/rows (always), rows/houses (sometimes), columns/columns (always), columns/houses (sometimes) are mutually exclusive
-            if len(allregion.intersection(combined)) == len(allregion):
-              for check in range(1, len(extras)+1):
-                for checkextra in itertools.combinations(extras, check):
-                  extraunion = frozenset.union(*checkextra)
-                  remextras = [x for x in extras if not x in checkextra]
-                  if any(len(x.intersection(extraunion)) == 0 for x in remextras): continue
-                  if len(extraunion) == len(checkextra) * l: #mutally exclusive
-                    newregion = (sum(x for x, _ in j) - tot * len(checkextra), tuple(combined - extraunion))
-                    if newregion[0] != 0: newcf = cf(newregion)[0]
-                    if newregion[0] != 0 and newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
-                      nextkiller.append(newregion); gencf[newregion] = newcf
-            if extras == []:
-              newregion = (sum(x for x, _ in j), tuple(combined))
-              newcf = cf(newregion)[0]
-              if newregion[0] == 64: print(newregion, newcf, cfgroup)
-              if newcf < cfgroup and not newregion in genkiller and not newregion in nextkiller:
-                nextkiller.append(newregion); gencf[newregion] = newcf
-                for x in j:
-                  if not x in killer: genkiller.remove(x)
+    if len(nextkiller) == 0: break
     genkiller.extend(nextkiller)
-    print(genkiller)
-  return genkiller
+  for p in get_mutex_cages([y for _, y in genkiller])[1:]:
+    print(len(p))
+    for jp in p:
+      j = [genkiller[j] for j in jp]
+      combined = frozenset.union(*(frozenset(q[1]) for q in j))
+      if not any(len(r.intersection(combined)) == len(r) for rg in mutex_rules for r in rg): #no extras
+        newregion = (sum(x for x, _ in j), tuple(combined))
+        newcf = cf(newregion)[0]
+        if newcf < cfgroup and not newregion in genkiller and not newregion in combinedkiller:
+          print(newregion, newcf)
+          combinedkiller.append(newregion); gencf[newregion] = newcf
+          #for x in j:
+          #  if not x in killer: genkiller.remove(x)
+
+  return genkiller + combinedkiller
 def knight_killer_balanced_cages_sudoku(puzzle, killer):
   l = len(puzzle)
   value_set = frozenset(range(1, l+1))
@@ -2241,11 +2306,14 @@ def combination_freedom_gen(mutex_rules, value_set, l):
   cell_visibility_rules = mutex_regions_to_visibility(mutex_rules)
   def combination_freedom(k):
     groups = get_mutex_cells(k[1], cell_visibility_rules, l)
+    if k[0] == 64: print(k[1], groups)
     groupcand = get_mutex_groups_min_dependent(groups)
     #if len(groupcand) != 1:
     #  minmaxes = [set(range(min_sum_efficient(vs), max_sum_efficient(vs)+1)) for vs in value_sets]
     #  totals = get_all_mutex_digit_sum_group_inner(total, minmaxes, set())
     #else: totals = [[k[0]]]
+    if k[0] == 64: print(k[0], [[f for j, f in g] for g in groupcand], value_set, multi_cage_sums(k[0], [[f for j, f in g] for g in groupcand], value_set), num_multi_cage_combs(k[0], [len(g) for g in groupcand if g != []], value_set))
+    #return (multi_cage_sums(k[0], [[f for j, f in g] for g in groupcand], value_set), len(k[1]), k[0])
     return (num_multi_cage_combs(k[0], [len(g) for g in groupcand if g != []], value_set), len(k[1]), k[0])
     """
     covered = set()
