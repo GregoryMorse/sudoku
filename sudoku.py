@@ -2231,18 +2231,30 @@ def killer_cages_sudoku(puzzle, killer):
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
   return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for x, y in killer if x <= sum(value_set) and len(y) <= l]),), (exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), value_set, None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
-def get_mutex_cages(cages, mx=None): #n^2 instead of combinatorics 2^n
+def get_mutex_cages(cages, mx=None, maximal=False): #n^2 instead of combinatorics 2^n
   multiples, pairdict = [{(i,) for i in range(len(cages))}, set()], {}
   for i, c in enumerate(cages):
     pairdict[i] = set()
     for j, cj in enumerate(cages[i+1:]):
       if len(c.intersection(cj)) == 0:
         multiples[1].add((i, i+1+j))
+        if maximal and (i,) in multiples[0]: multiples[0].remove((i,))
+        if maximal and (i+1+j,) in multiples[0]: multiples[0].remove((i+1+j,))
         pairdict[i].add(i+1+j)
   for l in range(3, len(cages) + 1 if mx is None else mx+1):
     multiples.append(set())
+    remp = set()
     for p in multiples[-2]:
-      multiples[-1] |= set(tuple((*p, x)) for x in set.intersection(*(pairdict[z] for z in p)).difference(p))
+      allp = set.intersection(*(pairdict[z] for z in p)).difference(p)
+      combs = set(tuple((*p, x)) for x in allp)
+      if maximal and len(combs) != 0:
+        remp.add(p)
+        remp |= set((*p[:-1], x) for x in allp)
+      multiples[-1] |= combs
+    multiples[-2] -= remp
+    if len(multiples[-1]) == 0:
+      multiples = multiples[:-1]
+      break
   return multiples
 def break_contained_cages(cages):
   addcages, removecages = [], []
@@ -2275,19 +2287,22 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
           #if len(combined) != sum(len(k[1]) for k in j): continue #no overlaps
           #if any(len(r.intersection(combined)) == 0 for r in region): continue
           #mutexregions = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) != 0] #only rows/rows (always), rows/houses (sometimes), columns/columns (always), columns/houses (sometimes) are mutually exclusive
-          #if not any(r.issubset(combined) for rg in mutex_rules for r in rg): #no extras
-          cfgroup = sum(gencf[x] for x in j)  
-          for regions in mutex_rules:
-            region = [r for r in regions if len(r.intersection(combined)) != 0]
-            allregion = frozenset.union(*region)
-            if len(combined) != len(allregion): #combined.issubset(allregion) and 
-              newreg = allregion.difference(combined)
-              newregion = (tot * len(region) - sum(x for x, _ in j), newreg)
-              if not any(r.issubset(newreg) for rg in mutex_rules for r in rg) and not any(r.issubset(newreg) for _, r in genkiller): #no subsuming or repeated regions
-                newcf = cf(newregion)[0]
-                if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
-                  print(newregion, newcf)
-                  nextkiller.append(newregion); gencf[newregion] = newcf
+          cfgroup = sum(gencf[x] for x in j)
+          regs = [r for regions in mutex_rules for r in regions if len(r.intersection(combined)) != 0]
+          for regions in get_mutex_cages(regs, maximal=True):
+            for rg in regions:
+              #for regions in mutex_rules:
+              #region = [r for r in regions if len(r.intersection(combined)) != 0]
+              region = [regs[j] for j in rg]
+              allregion = frozenset.union(*region)
+              if combined.issubset(allregion) and len(combined) != len(allregion):
+                newreg = allregion.difference(combined)
+                newregion = (tot * len(region) - sum(x for x, _ in j), newreg)
+                if not any(r.issubset(newreg) for rg in mutex_rules for r in rg) and not any(r.issubset(newreg) for _, r in genkiller): #no extras, no subsuming or repeated regions
+                  newcf = cf(newregion)[0]
+                  if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
+                    print(newregion, newcf)
+                    nextkiller.append(newregion); gencf[newregion] = newcf
       if len(nextkiller) == 0: break
       genkiller.extend(nextkiller)
       genkiller, nextkiller = break_contained_cages(genkiller)
@@ -2326,7 +2341,7 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
   for x, y in addkiller:
     regions = [r for rg in mutex_rules for r in rg if len(r.intersection(y)) != 0]
     reg1, reg2 = None, None
-    for p in get_mutex_cages(regions):
+    for p in get_mutex_cages(regions, 3):
       for jp in p:
         j = [regions[j] for j in jp]
         region = frozenset.union(*j)
@@ -2334,7 +2349,8 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
         if len(jp) == 2: reg1 = region
         if len(jp) == 3: reg2 = j
     if not reg1 is None and not reg2 is None:
-      if tuple(len(reg2[i].intersection(y)) for i in range(3)) in ((3,3,6),(3,6,3),(6,3,3)):
+      intscts = tuple(sorted(len(reg2[i].intersection(y)) for i in range(3)))
+      if intscts[0] == intscts[1] and intscts[0] + intscts[2] == l:
         remcells = reg1.difference(y)
         addkiller.append((tot * (len(reg1) // l) - x, remcells))
         for i in range(3):
