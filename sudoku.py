@@ -11,6 +11,8 @@
 #http://www.afjarvis.staff.shef.ac.uk/sudoku/sud23gp.html
 #https://nickp.svbtle.com/sudoku-satsolver
 #http://forum.enjoysudoku.com/
+#import cProfile
+#cProfile.run('check_puzzle(get_ctc_puzzles()[0])')
 import itertools
 
 def orthagonal_pts(i, j): return ((i, j-1), (i-1, j), (i+1, j), (i, j+1))
@@ -1685,25 +1687,27 @@ def exclude_battlefield_rule_gen(fields):
         for y in rem[pt[0]][pt[1]].difference(possibles[i]):
           exclude.append((pt[0], pt[1], y))
       if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
-    for indexes in get_mutex_cages([y for _, y in fields], l)[l-1]: #length l mutually exclusive regions
-      fieldset = [fields[i] for i in indexes]
-      fieldsetsums = [fieldsums[i] for i in indexes]
-      allposs = [[set(), set()] for _ in fieldset]
-      for sums in get_all_mutex_digit_group_sum(tot << 1, [1 for _ in range(l)], fieldsetsums):
+    maxmut = get_mutex_cages([y for _, y in fields], l, True)
+    if len(maxmut) >= l:
+      for indexes in maxmut[l-1]: #length l maximally mutually exclusive regions
+        fieldset = [fields[i] for i in indexes]
+        fieldsetsums = [fieldsums[i] for i in indexes]
+        allposs = [[set(), set()] for _ in fieldset]
+        for sums in get_all_mutex_digit_group_sum(tot << 1, [1 for _ in range(l)], fieldsetsums):
+          for i, (val, points) in enumerate(fieldset):
+            contig = tuple(sorted(points))
+            start, stop = contig[0], contig[-1]
+            for s, p in itertools.product(rem[start[0]][start[1]], rem[stop[0]][stop[1]]):
+              if s == p: continue
+              if s + p == sums[i]:
+                allposs[i][0].add(s); allposs[i][-1].add(p)
+        exclude = []
         for i, (val, points) in enumerate(fieldset):
           contig = tuple(sorted(points))
-          start, stop = contig[0], contig[-1]
-          for s, p in itertools.product(rem[start[0]][start[1]], rem[stop[0]][stop[1]]):
-            if s == p: continue
-            if s + p == sums[i]:
-              allposs[i][0].add(s); allposs[i][-1].add(p)
-      exclude = []
-      for i, (val, points) in enumerate(fieldset):
-        contig = tuple(sorted(points))
-        for j, pt in enumerate((contig[0], contig[-1])):
-          for y in rem[pt[0]][pt[1]].difference(allposs[i][j]):
-            exclude.append((pt[0], pt[1], y))
-      if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
+          for j, pt in enumerate((contig[0], contig[-1])):
+            for y in rem[pt[0]][pt[1]].difference(allposs[i][j]):
+              exclude.append((pt[0], pt[1], y))
+        if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
     return possible
   return exclude_battlefield_rule
 def exclude_renban_rule_gen(cages):
@@ -2277,13 +2281,17 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
   cf = combination_freedom_gen(cell_visibility_rules, value_set, l)
   genkiller, combinedkiller = [(x, frozenset(y)) for x, y in killer], []
   gencf = {x: cf(x)[0] for x in genkiller}
+  already = set()
   while True:
     while True:
       nextkiller = []
-      for p in get_mutex_cages([y for _, y in genkiller]):
+      print(tuple(len(x) for x in get_mutex_cages([y for _, y in genkiller], maximal=True)))
+      for p in get_mutex_cages([y for _, y in genkiller], maximal=True)[-2:] + get_mutex_cages([y for _, y in genkiller], 2):
         for jp in p:
           j = [genkiller[j] for j in jp]
           combined = frozenset.union(*(q[1] for q in j))
+          if combined in already: continue
+          already.add(combined)
           #if len(combined) != sum(len(k[1]) for k in j): continue #no overlaps
           #if any(len(r.intersection(combined)) == 0 for r in region): continue
           #mutexregions = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) != 0] #only rows/rows (always), rows/houses (sometimes), columns/columns (always), columns/houses (sometimes) are mutually exclusive
@@ -2301,16 +2309,17 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
                 if not any(r.issubset(newreg) for rg in mutex_rules for r in rg) and not any(r.issubset(newreg) for _, r in genkiller): #no extras, no subsuming or repeated regions
                   newcf = cf(newregion)[0]
                   if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
-                    print(newregion, newcf)
+                    print(newregion, newcf, cfgroup)
                     nextkiller.append(newregion); gencf[newregion] = newcf
       if len(nextkiller) == 0: break
       genkiller.extend(nextkiller)
       genkiller, nextkiller = break_contained_cages(genkiller)
       for g in nextkiller: genkiller.append(g); gencf[g] = cf(g)[0]
     nextkiller = []
-    for p in get_mutex_cages([y for _, y in genkiller], 2)[1:]: #will assume for now that combinations of 2 is enough but probably need to compare combination freedom as less or equal not less - then also keep doing this in a loop
+    gencomb = genkiller + combinedkiller
+    for p in get_mutex_cages([y for _, y in gencomb], 2)[1:]: #will assume for now that combinations of 2 is enough but probably need to compare combination freedom as less or equal not less - then also keep doing this in a loop
       for jp in p:
-        j = [genkiller[j] for j in jp]
+        j = [gencomb[j] for j in jp]
         #if any cage is not visible from the other cages, then should skip...
         combined = frozenset.union(*(q[1] for q in j))
         if not any(r.issubset(combined) for rg in mutex_rules for r in rg): #no extras
@@ -2318,10 +2327,11 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
           newregion = (sum(x for x, _ in j), combined)
           newcf = cf(newregion)[0]
           if newcf < cfgroup and not newregion in genkiller and not newregion in combinedkiller:
-            for g in cage_breakdown(cell_visibility_rules, value_set, l, newregion):
-              if not g in genkiller and not g in nextkiller: nextkiller.append(g); gencf[g] = cf(g)[0]
+            print(newcf, cfgroup, newregion)
+            if newcf < cfgroup >> 1:
+              for g in cage_breakdown(cell_visibility_rules, value_set, l, newregion):
+                if not g in genkiller and not g in nextkiller: nextkiller.append(g); gencf[g] = cf(g)[0]
             combinedkiller.append(newregion); gencf[newregion] = newcf
-            print(newregion)
             #for x in j:
             #  if not x in killer: genkiller.remove(x)
     if len(nextkiller) == 0: break
@@ -2410,7 +2420,7 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
   cages = [(x, y) for x, y in killer if len(y) <= l] #only non-balanced cages
   cvr = (knight_rule_points,killer_puzzle_gen(cages),)
   cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
-  killergen = best_killer_cages(cages + addkiller, mutex_rules, cell_visibility_rules, value_set) #+ [(3, ((6,4),))]
+  killergen = best_killer_cages(cages + addkiller, mutex_rules, cell_visibility_rules, value_set)
   #print(tuple(combination_freedom_gen(cell_visibility_rules, value_set, l)(x) for x in killergen))
   killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
   #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
@@ -2499,6 +2509,7 @@ def little_killer_sudoku(puzzle, little_killer_diagonals):
   killer = [(y, get_diagonal(i, j, l)) for i, x in enumerate(little_killer_diagonals) for j, y in enumerate(x) if not y is None]
   mutex_rules = standard_sudoku_mutex_regions(l)
   value_set = frozenset(range(1, l+1))
+  """
   addkiller = []
   for regions in mutex_rules:
     for region in regions:
@@ -2508,11 +2519,14 @@ def little_killer_sudoku(puzzle, little_killer_diagonals):
           combined = frozenset.union(*(frozenset(q[1]) for q in j))
           if len(region.intersection(combined)) > (len(value_set) >> 1) and len(combined.difference(region)) <= (len(value_set) >> 1):
             addkiller.append((sum(q[0] for q in j), tuple(combined)))
+  """
   #killer clues should be sorted by number of combinations for maximal speed very similar to a degrees of freedom metric  
   cvr = ()
   cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
-  killer = list(sorted((*killer, *addkiller), key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
-  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killer),), value_set, None, (print_sudoku, print_candidate_format))
+  killergen = best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set)
+  killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))  
+  #killergen = list(sorted((*killer, *addkiller), key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
+  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen),), value_set, None, (print_sudoku, print_candidate_format))
 def sandwich_sudoku(puzzle, sandwich_row_cols):
   l = len(puzzle)
   sandwiches = [(x, row_points(i, 0, l)) for i, x in enumerate(sandwich_row_cols[0]) if not x is None] + [(x, column_points(0, i, l)) for i, x in enumerate(sandwich_row_cols[1]) if not x is None]
@@ -3200,10 +3214,6 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
-    #little_killer_sudoku(fiendish_little_killer_sudoku, fiendish_little_killer_diagonals),
-    #knight_killer_balanced_cages_sudoku(antiknight_killer_sudoku, antiknight_killer_sudoku_cages),
-    knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
-
     thermo_sandwich_sudoku(thermo_sandwich_puzzle, thermo_sandwich_puzzle_sandwiches, thermo_sandwich_puzzle_thermos),
     )
   return (
