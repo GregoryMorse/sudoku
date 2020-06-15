@@ -139,9 +139,9 @@ def check_bad_sudoku(rem):
   return False
 LAST_DIGIT,FULL_HOUSE,NAKED_SINGLE,HIDDEN_SINGLE,LOCKED_CANDIDATES,NAKED_MULTIPLES,HIDDEN_MULTIPLES,BASIC_FISH,FINNED_FISH,X_CHAIN,XY_CHAIN,BIFURCATION=0,1,2,3,4,5,6,7,8,9,10,11
 X_CHAIN_SKYSCRAPER,X_CHAIN_TWOSTRINGKITE,X_CHAIN_TURBOT_FISH=0,1,2
-KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE,SANDWICH_RULE,ARROW_RULE,EVEN_ODD,MIRROR_RULE,SYMMETRY_RULE,BATTLEFIELD_RULE,RENBAN_RULE,IN_ORDER_RULE,JOUSTING_KNIGHTS,FIBONACCI_RULE,DOUBLE_RULE,MANHATTAN_RULE,SMALL_BIG=12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+KILLER_CAGE_RULE,THERMO_RULE,INEQUALITY_RULE,HIDDEN_CAGE_TUPLE,MIRROR_CAGE_CELL,ORTHAGONAL_NEIGHBOR,MAGIC_SQUARE,SANDWICH_RULE,ARROW_RULE,EVEN_ODD,MIRROR_RULE,SYMMETRY_RULE,BATTLEFIELD_RULE,RENBAN_RULE,IN_ORDER_RULE,JOUSTING_KNIGHTS,FIBONACCI_RULE,DOUBLE_RULE,MANHATTAN_RULE,SMALL_BIG,SNAKE_EGG_RULE=12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
 STRING_RULES = ("Last Digit", "Full House", "Naked Single", "Hidden Single", "Locked Candidates", "Naked %s", "Hidden %s", "Basic %s", "Finned %s", "X-Chain", "XY-Chain", "Bifurcation",
-                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square", "Sandwich Rule", "Arrow Rule", "Even or Odd Rule", "Mirror Rule", "Symmetry Rule", "Battlefield Rule", "Renban Rule", "In Order Rule", "Jousting Knights", "Fibonacci Rule", "Double Rule", "Manhattan Rule", "Small or Big Rule")
+                "Killer Cage Rule", "Thermometer Rule", "Inequality Rule", "Hidden Cage Tuple", "Mirror Cage Cell", "Orthagonal Neighbor", "Magic Square", "Sandwich Rule", "Arrow Rule", "Even or Odd Rule", "Mirror Rule", "Symmetry Rule", "Battlefield Rule", "Renban Rule", "In Order Rule", "Jousting Knights", "Fibonacci Rule", "Double Rule", "Manhattan Rule", "Small or Big Rule", "Snake Egg Rule")
 def naked_single(rem, mutex_rules, cell_visibility_rules, value_set, dynamic_visibility=None):
   l, possible = len(rem), []
   #should find the full houses before naked singles followed by hidden singles
@@ -1437,7 +1437,7 @@ def exclude_killer_rule_gen(killer): #digits unique in a cage
     l, possible = len(rem), []
     tot = sum(z for z in value_set)
     for x, y in killer:
-      print(x, y)
+      #print(x, y)
       exclude = []
       groups = list(get_mutex_cells(y, cell_visibility_rules, l))
       groupcand = get_mutex_groups_min_dependent(groups)
@@ -1495,17 +1495,22 @@ def exclude_killer_rule_gen(killer): #digits unique in a cage
       """
       #yidxdict = {pt:i for i, pt in enumerate(y)}
       #unorthodox locked candidates
-      for regions in mutex_rules: #because of potential repeated values, more general to find common values per region than globally
-        for region in regions:
-          commonpts = region.intersection(y)
-          yidxs = [yidxdict[pt] for pt in commonpts]
-          common = frozenset.intersection(*(frozenset(s[i] for i in yidxs) for s in sets))
-          for c in common:
-            exclude = []
-            for cell in region.difference(commonpts):
-              if c in rem[cell[0]][cell[1]]:
-                exclude.append((cell[0], cell[1], c))
-            if len(exclude) != 0: possible.append((exclude, KILLER_CAGE_RULE, (x, y)))
+      import math
+      if len(sets) != math.factorial(len(y)):
+        musthave = frozenset.intersection(*(frozenset(s) for s in sets))
+        for regions in mutex_rules: #because of potential repeated values, more general to find common values per region than globally
+          for region in regions:
+            commonpts = region.intersection(y)
+            if len(commonpts) == 0: continue
+            yidxs = [yidxdict[pt] for pt in commonpts]
+            #common = frozenset.intersection(*(frozenset(s[i] for i in yidxs) for s in sets))
+            common = musthave - (set.union(*(p for i, p in enumerate(possibles) if not i in yidxs)) if len(yidxs) != len(y) else set())
+            for c in common:
+              exclude = []
+              for cell in region.difference(commonpts):
+                if c in rem[cell[0]][cell[1]]:
+                  exclude.append((cell[0], cell[1], c))
+              if len(exclude) != 0: possible.append((exclude, KILLER_CAGE_RULE, (x, y)))
       #can exclude any sets where a double interferes with a 2 visible triples, a triple interferes with a 2/3 visible quadruples, or 3 quintuples, a quadruple interferes with a 4 quintuples
       if len(y) == 2: #this needs much better generalization, could start tracking multi-cell constraints above...
         exclude = []
@@ -1577,6 +1582,17 @@ def exclude_cage_mirror_rule_gen(cages):
     exclude = []
     for c in cages:
       for i in range(len(c)):
+        vis = cell_visibility(c[i][0], c[i][1], l, cell_visibility_rules) | frozenset((c[i],))
+        for regions in mutex_rules:
+          for region in regions:
+            if len(region.intersection(vis)) == len(region) - 1:
+              pt = next(iter(region - vis))
+              cand = rem[c[i][0]][c[i][1]].intersection(rem[pt[0]][pt[1]])
+              for y in rem[c[i][0]][c[i][1]] - cand:
+                exclude.append((c[i][0], c[i][1], y))
+              for y in rem[pt[0]][pt[1]] - cand:
+                exclude.append((pt[0], pt[1], y))
+        """
         a = tuple(cell_visibility(x, y, l, cell_visibility_rules) for x, y in c[:i] + c[i+1:]) #if len(rem[x][y]) != 1
         visible = frozenset.intersection(*a) if len(a) != 0 else frozenset()
         visible = {x for x in visible if len(rem[x[0]][x[1]]) != 1}
@@ -1585,6 +1601,7 @@ def exclude_cage_mirror_rule_gen(cages):
           for y in rem[c[i][0]][c[i][1]] - rem[p[0]][p[1]]:
             exclude.append((c[i][0], c[i][1], y))
             print(visible, c, y)
+        """
     if len(exclude) != 0: possible.append((exclude, MIRROR_CAGE_CELL, ()))
     return possible
   return exclude_cage_mirror_rule
@@ -1687,7 +1704,7 @@ def exclude_battlefield_rule_gen(fields):
         for y in rem[pt[0]][pt[1]].difference(possibles[i]):
           exclude.append((pt[0], pt[1], y))
       if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
-    maxmut = get_mutex_cages([y for _, y in fields], l, True)
+    maxmut = get_mutex_cages([y for _, y in fields], cell_visibility_rules, l, l, True)
     if len(maxmut) >= l:
       for indexes in maxmut[l-1]: #length l maximally mutually exclusive regions
         fieldset = [fields[i] for i in indexes]
@@ -2127,10 +2144,122 @@ def magic_square_center_to_killer_cages(ms, value_set):
   #        (sm, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] + 1))),
   #        (sm, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] - 1))))
 
+def exclude_snake_egg_rule_gen(snake, cagesizes):
+  def exclude_snake_egg_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+    possible, l = [], len(rem)
+    snakerem = [[(i, j) in snake for j in range(len(x))] for i, x in enumerate(rem)] #True for snake, False for undetermined, None for not snake
+    onlysnake = value_set.difference(cagesizes)
+    ominodict = {}
+    ominos = []
+    remcagesizes = list(cagesizes)
+    def add_to_ominos(x, y):
+      neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
+      relnbs = [(i, j) for i, j in neighbors if (i, j) in ominodict]
+      nbominos = (frozenset.union(*(ominodict[p] for p in relnbs)) if len(relnbs) != 0 else frozenset()) | frozenset(((x, y),))
+      for p in {ominodict[p] for p in relnbs}: ominos.remove(p)
+      for p in nbominos:
+        ominodict[p] = nbominos
+      ominos.append(nbominos)
+    for x in range(l):
+      for y in range(l):
+        if rem[x][y].issubset(onlysnake):
+          if snakerem[x][y] == False: snakerem[x][y] = True
+    """
+    truesnake = (
+      (0, 1, 1, 1, 1, 0, 1, 1, 1),
+      (1, 1, 0, 0, 1, 0, 1, 0, 1),
+      (1, 0, 1, 1, 1, 0, 1, 0, 1),
+      (1, 0, 1, 0, 0, 0, 1, 0, 1),
+      (1, 0, 1, 1, 0, 1, 1, 0, 1),
+      (1, 0, 0, 1, 1, 0, 0, 1, 1),
+      (1, 1, 1, 0, 1, 0, 0, 1, 0),
+      (0, 0, 1, 0, 1, 0, 0, 1, 0),
+      (0, 0, 0, 0, 1, 1, 1, 1, 0))
+    snakerem[3][3] = None; add_to_ominos(3, 3)
+    snakerem[2][5] = None; add_to_ominos(2, 5)
+    """
+    snakerem[4][7] = None; add_to_ominos(4, 7)
+    snakerem[8][7] = True
+    snakerem[7][4] = None; add_to_ominos(7, 4)
+    while True:
+      progress = False
+      for x, y in snake:
+        neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
+        if any(snakerem[i][j] for i, j in neighbors):
+          for i, j in neighbors:
+            if snakerem[i][j] == False: snakerem[i][j] = None; add_to_ominos(i, j); progress = True
+      for x in range(l):
+        for y in range(l):
+          if (x, y) in snake: continue
+          neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
+          if sum(1 for i, j in neighbors if snakerem[i][j] is None) == len(neighbors) - 1:
+            if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
+          elif len(neighbors) == 2 and (all(snakerem[i][j] == False for i, j in neighbors) or all(snakerem[i][j] == True for i, j in neighbors)):
+            i, j = next(iter(frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in neighbors)) - frozenset(((x, y),)))) #diagonal point
+            if snakerem[i][j] and snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
+          if snakerem[x][y]:
+            snakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == True)
+            notsnakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == False)
+            if (snakeneigh == 1 and notsnakeneigh == 1) or (snakeneigh == 0 and notsnakeneigh == 2):
+              for i, j in neighbors:
+                if snakerem[i][j] == False: snakerem[i][j] = True; progress = True
+            elif snakeneigh == 2:
+              for i, j in neighbors:
+                if snakerem[i][j] == False: snakerem[i][j] = None; add_to_ominos(i, j); progress = True
+      for omino in ominos:        
+        #if surrounded remove from remaining cage sizes
+        border = get_path_boundary(omino, l)
+        openborder = [(x, y) for x, y in border if snakerem[x][y] == False]
+        mn, mx = max(min(rem[x][y]) for x, y in omino), min(max(rem[x][y]) for x, y in omino)
+        if len(openborder) == 1 and len(omino) < mn:
+          for x, y in openborder:
+            snakerem[x][y] = None; add_to_ominos(x, y); progress = True            
+        if all(snakerem[x][y] for x, y in border):
+          if len(omino) in remcagesizes:
+            remcagesizes.remove(len(omino)); onlysnake = value_set if len(remcagesizes) == 0 else {x for x in value_set if x > max(remcagesizes)}
+            for x in range(l):
+              for y in range(l):
+                if rem[x][y].issubset(onlysnake):
+                  if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
+        elif len(omino) == max(remcagesizes) or len(omino) == min(remcagesizes) and len(ominos) == len(cagesizes) and sum(1 for o in ominos if len(o) <= len(omino)) <= len(omino):
+          for x, y in border:
+            if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
+        elif len(omino) == max(remcagesizes) - 1:
+          for x, y in border:
+            neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
+            if sum(1 for i, j in neighbors if snakerem[i][j] is None) == len(neighbors) - 2: #snake+snake or not snake+snake is okay, not snake+not snake not possible by cage size, snake+not snake impossible
+              for i, j in border.intersection(neighbors):
+                if snakerem[i][j] == False: snakerem[i][j] = True; progress = True
+        elif len(omino) == max(remcagesizes) - 2:
+          for j in itertools.combinations(openborder, 2): #must consider and exclude all cases first
+            pass
+      #if not all([all([True if y is False else (1 if y else 0) == truesnake[i][j] for j, y in enumerate(x)]) for i, x in enumerate(snakerem)]):
+        #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+        #raise ValueError
+      if not progress: break
+    print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+    #print(ominos, remcagesizes)
+    eggs = []
+    exclude = []
+    for omino in ominos:
+      border = get_path_boundary(omino, l)
+      if all(snakerem[x][y] for x, y in border): onlysnake = {z for z in value_set if z > len(omino)}; eggs.append(omino)
+      else: onlysnake = value_set.difference(cagesizes)
+      for x, y in omino:
+        for z in rem[x][y].intersection(onlysnake):
+          exclude.append((x, y, z))
+    if len(exclude) != 0: possible.append((exclude, SNAKE_EGG_RULE, ()))
+    def egg_exclusion_visibility(i, j, rem, y):
+      for egg in eggs:
+        if (i, j) in egg: return frozenset(egg) - frozenset(((i, j),))
+      return frozenset()
+    possible.extend(naked_single(rem, mutex_rules, cell_visibility_rules, value_set, egg_exclusion_visibility))
+    return possible
+  return exclude_snake_egg_rule
 def check_puzzle(y):
   rem, solve_path, border = solve_sudoku(y[0], y[1], y[2], y[3], y[4], y[5])
   rem, valid = check_sudoku(rem, y[1], y[4])
-  #print(logical_solve_string(solve_path, y[1]))
+  print(logical_solve_string(solve_path, y[1]))
   if not rem is None:
     y[6][0](rem) if y[5] is None else y[6][0](rem, border)
     if not valid:
@@ -2235,25 +2364,27 @@ def killer_cages_sudoku(puzzle, killer):
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
   return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for x, y in killer if x <= sum(value_set) and len(y) <= l]),), (exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), value_set, None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
-def get_mutex_cages(cages, mx=None, maximal=False): #n^2 instead of combinatorics 2^n
-  multiples, pairdict = [{(i,) for i in range(len(cages))}, set()], {}
+def get_mutex_cages(cages, cell_visibility_rules, l, mx=None, maximal=False): #n^2 instead of combinatorics 2^n
+  multiples, pairdict = [{(i,) for i in range(len(cages))}, set()], {i:set() for i in range(len(cages))}
   for i, c in enumerate(cages):
-    pairdict[i] = set()
     for j, cj in enumerate(cages[i+1:]):
-      if len(c.intersection(cj)) == 0:
-        multiples[1].add((i, i+1+j))
-        if maximal and (i,) in multiples[0]: multiples[0].remove((i,))
-        if maximal and (i+1+j,) in multiples[0]: multiples[0].remove((i+1+j,))
-        pairdict[i].add(i+1+j)
+      if len(c.intersection(cj)) == 0: #no overlaps
+        #one cage must also see the other to cut down on excessive combinations
+        if len(frozenset.union(*(cell_visibility(x, y, l, cell_visibility_rules) for x, y in c)).intersection(cj)) != 0:
+          multiples[1].add((i, i+1+j))
+          if maximal and (i,) in multiples[0]: multiples[0].remove((i,))
+          if maximal and (i+1+j,) in multiples[0]: multiples[0].remove((i+1+j,))
+          pairdict[i].add(i+1+j)
+          pairdict[i+1+j].add(i) #must have for transitivity due to cell visibility restriction
   for l in range(3, len(cages) + 1 if mx is None else mx+1):
     multiples.append(set())
     remp = set()
     for p in multiples[-2]:
       allp = set.intersection(*(pairdict[z] for z in p)).difference(p)
-      combs = set(tuple((*p, x)) for x in allp)
+      combs = set(tuple(sorted((*p, x))) for x in allp)
       if maximal and len(combs) != 0:
         remp.add(p)
-        remp |= set((*p[:-1], x) for x in allp)
+        remp |= set(tuple(sorted((*p[:-1], x))) for x in allp)
       multiples[-1] |= combs
     multiples[-2] -= remp
     if len(multiples[-1]) == 0:
@@ -2285,8 +2416,8 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
   while True:
     while True:
       nextkiller = []
-      print(tuple(len(x) for x in get_mutex_cages([y for _, y in genkiller], maximal=True)))
-      for p in get_mutex_cages([y for _, y in genkiller], maximal=True)[-2:] + get_mutex_cages([y for _, y in genkiller], 2):
+      print(tuple(len(x) for x in get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, maximal=True)))
+      for p in get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, 4) + get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, maximal=True)[-1:]:
         for jp in p:
           j = [genkiller[j] for j in jp]
           combined = frozenset.union(*(q[1] for q in j))
@@ -2297,7 +2428,7 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
           #mutexregions = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) != 0] #only rows/rows (always), rows/houses (sometimes), columns/columns (always), columns/houses (sometimes) are mutually exclusive
           cfgroup = sum(gencf[x] for x in j)
           regs = [r for regions in mutex_rules for r in regions if len(r.intersection(combined)) != 0]
-          for regions in get_mutex_cages(regs, maximal=True):
+          for regions in get_mutex_cages(regs, cell_visibility_rules, l, maximal=True):
             for rg in regions:
               #for regions in mutex_rules:
               #region = [r for r in regions if len(r.intersection(combined)) != 0]
@@ -2306,7 +2437,7 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
               if combined.issubset(allregion) and len(combined) != len(allregion):
                 newreg = allregion.difference(combined)
                 newregion = (tot * len(region) - sum(x for x, _ in j), newreg)
-                if not any(r.issubset(newreg) for rg in mutex_rules for r in rg) and not any(r.issubset(newreg) for _, r in genkiller): #no extras, no subsuming or repeated regions
+                if not any(r.issubset(newreg) for rg in mutex_rules for r in rg) and not any(r.issubset(newreg) for _, r in genkiller) and (len(newregion[1]) != l or newregion[0] != tot): #no extras, no subsuming or repeated regions
                   newcf = cf(newregion)[0]
                   if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
                     print(newregion, newcf, cfgroup)
@@ -2317,7 +2448,7 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
       for g in nextkiller: genkiller.append(g); gencf[g] = cf(g)[0]
     nextkiller = []
     gencomb = genkiller + combinedkiller
-    for p in get_mutex_cages([y for _, y in gencomb], 2)[1:]: #will assume for now that combinations of 2 is enough but probably need to compare combination freedom as less or equal not less - then also keep doing this in a loop
+    for p in get_mutex_cages([y for _, y in gencomb], cell_visibility_rules, l, 2)[1:]: #will assume for now that combinations of 2 is enough but probably need to compare combination freedom as less or equal not less - then also keep doing this in a loop
       for jp in p:
         j = [gencomb[j] for j in jp]
         #if any cage is not visible from the other cages, then should skip...
@@ -2326,7 +2457,7 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
           cfgroup = sum(gencf[x] for x in j)
           newregion = (sum(x for x, _ in j), combined)
           newcf = cf(newregion)[0]
-          if newcf < cfgroup and not newregion in genkiller and not newregion in combinedkiller:
+          if newcf < cfgroup and not newregion in genkiller and not newregion in combinedkiller and (len(newregion[1]) != l or newregion[0] != tot):
             print(newcf, cfgroup, newregion)
             if newcf < cfgroup >> 1:
               for g in cage_breakdown(cell_visibility_rules, value_set, l, newregion):
@@ -2347,11 +2478,14 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
   #totkiller = sum(x for x, _ in killer)
   #killerpoints = set.union(*(set(x) for _, x in killer))
   mutex_rules = standard_sudoku_mutex_regions(l)
+  cages = [(x, y) for x, y in killer if len(y) <= l] #only non-balanced cages
+  cvr = (knight_rule_points,killer_puzzle_gen(cages),)
+  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
   addkiller = [(x, set(y)) for x, y in killer if len(y) > l]
   for x, y in addkiller:
     regions = [r for rg in mutex_rules for r in rg if len(r.intersection(y)) != 0]
     reg1, reg2 = None, None
-    for p in get_mutex_cages(regions, 3):
+    for p in get_mutex_cages(regions, cell_visibility_rules, l, 3):
       for jp in p:
         j = [regions[j] for j in jp]
         region = frozenset.union(*j)
@@ -2370,64 +2504,20 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
     addkiller, morekiller = break_contained_cages(addkiller)
     addkiller = addkiller + morekiller
     if len(morekiller) == 0: break
+  for x, c in killer:
+    for i in range(len(c)):
+      vis = cell_visibility(c[i][0], c[i][1], l, cell_visibility_rules) | frozenset((c[i],))
+      for regions in mutex_rules:
+        for region in regions:
+          if len(region.intersection(vis)) == len(region) - 1: #mirror found so make a new cage
+            pt = next(iter(region - vis))
+            addkiller.append((x, (pt, *c[:i], *c[i+1:])))
   print(addkiller)
-  """
-  for x, y in killer:
-    for regions in mutex_rules:
-      for region in regions:
-        if len(region.intersection(y)) == len(y):
-          killer = ((tot - x, tuple(region.difference(y))), *killer)
-  for regions in mutex_rules:
-    for region in regions:
-      intsct = [(x, y) for x, y in killer if len(region.intersection(y)) != 0]
-      for p in range(2, len(intsct)+1):
-        for j in itertools.combinations(intsct, p):
-          combined = frozenset.union(*(frozenset(q[1]) for q in j))
-          if len(combined) != sum(len(k[1]) for k in j): continue #no overlaps
-          #if len(region.intersection(combined)) != len(combined) and len(region.intersection(combined)) > (len(value_set) >> 1) and len(combined.difference(region)) <= (len(value_set) >> 1):
-          #  newregion = (sum(q[0] for q in j), tuple(combined))
-          #  if not newregion in addkiller:
-          #    print(newregion)
-          #    addkiller.append(newregion)
-          for rs in mutex_rules:
-            for r in itertools.combinations(rs, 2):
-              fullr = frozenset.union(*r)
-              if len(fullr.intersection(combined)) == len(combined) and all(len(z.intersection(combined)) != 0 for z in r) and len(fullr) != len(combined):
-                newregion = (tot * len(r) - sum(x for x, _ in j), tuple(fullr - combined))
-                if not newregion in killergen and not newregion in killer and newregion[0] <= tot: killergen.append(newregion)
-          if len(region.intersection(combined)) == len(region):
-            extras = [r for rg in mutex_rules for r in rg if len(r.intersection(combined)) == len(r)]
-            if len(frozenset.union(*extras)) in [len(extras) * l, (len(extras) * l) >> 1]:
-              if len(combined - frozenset.union(*extras)) != 0 and len(combined - frozenset.union(*extras)) <= l + (l >> 1):
-                newregion = (sum(x for x, _ in j) - tot * (len(frozenset.union(*extras)) // l), tuple(combined - frozenset.union(*extras)))
-                if not newregion in killergen:
-                  killergen.append(newregion)
-  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules)
-  deletekiller = []
-  for x, y in killer:
-    regions = [r for rg in mutex_rules for r in rg if len(r.intersection(y)) != 0]
-    for j in itertools.combinations(regions, 2):      
-      if len(frozenset.union(*j)) == len(j) * l: #non overlapping - len(j[0].intersection(j[1])) == 0
-        exc = frozenset.union(*j).difference(y)
-        if len(exc) != 0 and len(exc) <= l and len(frozenset.union(*j).intersection(y)) == len(y):
-          killergen.append(((tot << 1) - x, tuple(exc)))
-          #these are the balancing rule - should just look at regions directly this is actually a lousy way to find them
-          addkiller.append((x - tot, tuple(z for z in j[0].intersection(y) if len(cell_visibility(z[0], z[1], l, cell_visibility_rules).intersection(j[1].intersection(y))) == 0)))
-          addkiller.append((x - tot, tuple(z for z in j[1].intersection(y) if len(cell_visibility(z[0], z[1], l, cell_visibility_rules).intersection(j[0].intersection(y))) == 0)))
-          deletekiller.append((x, y))
-  addkiller.append((sum(value_set) * l - totkiller, tuple(set(itertools.product(list(range(l)), list(range(l)))) - killerpoints)))
-  """
-  cages = [(x, y) for x, y in killer if len(y) <= l] #only non-balanced cages
-  cvr = (knight_rule_points,killer_puzzle_gen(cages),)
-  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
   killergen = best_killer_cages(cages + addkiller, mutex_rules, cell_visibility_rules, value_set)
-  #print(tuple(combination_freedom_gen(cell_visibility_rules, value_set, l)(x) for x in killergen))
   killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
   #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
-  #print(cages, killergen)
-  #exclude_cage_mirror_rule_gen([y for _, y in cages])
-  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen), exclude_cage_hidden_tuple_rule_gen([y for _, y in cages]), ), value_set, None,
+  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen), exclude_cage_hidden_tuple_rule_gen([y for _, y in cages]), exclude_cage_mirror_rule_gen([y for _, y in cages])), value_set, None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
 def killer_cages_diagonal_sudoku(puzzle, killer):
   l = len(puzzle)
@@ -2554,7 +2644,14 @@ def manhattan_thermo_doubles_sudoku(puzzle, thermo, doubles, taxis, max_subset):
 def manhattan_sudoku(puzzle, taxis, max_subset):
   l = len(puzzle)
   return (puzzle, (*standard_sudoku_mutex_regions(l), diagonal_sudoku_regions(l)), (), (exclude_manhattan_rule_gen(taxis,max_subset),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
-
+def snake_egg_sudoku(puzzle, snake, cagesizes):
+  l = len(puzzle)
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_snake_egg_rule_gen(snake, cagesizes),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def snake_egg_jigsaw_sudoku(puzzle, jigsaw, snake, cagesizes):
+  l = len(puzzle)
+  return (puzzle, (*standard_sudoku_singoverlap_regions(l), tuple(frozenset(x) for x in jigsaw_to_coords(jigsaw).values())), (), (exclude_snake_egg_rule_gen(snake, cagesizes),), frozenset(range(1, l+1)), None,
+          (lambda x: print_border(x, exc_from_border(jigsaw, set())), lambda x: print_candidate_border(x, jigsaw)))
+  
 def file_puzzles(filename):
   with open(filename) as f:
     return [standard_sudoku(str_to_sudoku(x.strip())) for x in f.readlines() if len(x) == 9 * 9 + 1]
@@ -3203,7 +3300,52 @@ def get_ctc_puzzles():
   border_skirmish_sudoku_overgaps = (
     (2, 2, 0, 1, 2, 1, 1, 1, 8),
     (9, 0, 0, 7, 0, 0, 8, 7, 0)
-  )    
+  )
+  
+  million_dollar_sudoku = ((None,) * 9,) * 9 #https://www.youtube.com/watch?v=hOAB65KFl6I
+  million_dollar_sudoku_cages = (
+    (25, ((0, 0), (0, 1), (0, 2), (1, 2), (1, 3), (2, 2))),
+    (37, ((0, 5), (0, 6), (1, 5), (2, 3), (2, 4), (2, 5))),
+    (39, ((0, 8), (1, 8), (2, 6), (2, 7), (2, 8), (3, 7))),
+    #('-', ((2, 0), (3, 0), (3, 1), (3, 2), (4, 2), (5, 2)))
+    (35, ((3, 6), (4, 6), (5, 6), (5, 7), (5, 8), (6, 8))),
+    (21, ((5, 1), (6, 0), (6, 1), (6, 2), (7, 0), (8, 0))),
+    (24, ((6, 3), (6, 4), (6, 5), (7, 3), (8, 2), (8, 3))),
+    (35, ((6, 6), (7, 5), (7, 6), (8, 6), (8, 7), (8, 8))))
+    
+  grandmaster_tribute_sudoku = ( #https://www.youtube.com/watch?v=UTX8dF3n57M
+    (None, None, None, None, None, None, None, None, None),
+    (None, 8, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, 5, None, None, None, None),
+    (None, None, None, 7, None, None, None, None, None),
+    (None, None, 9, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None))
+  grandmaster_tribute_sudoku_jigsaw = (
+    (1, 1, 1, 1, 1, 1, 2, 2, 3),
+    (4, 4, 1, 5, 1, 2, 2, 2, 3),
+    (6, 4, 4, 5, 1, 2, 2, 3, 3),
+    (6, 4, 5, 5, 2, 2, 7, 3, 3),
+    (6, 4, 4, 5, 7, 7, 7, 3, 3),
+    (6, 4, 4, 5, 5, 8, 7, 7, 3),
+    (6, 6, 6, 5, 5, 8, 7, 7, 7),
+    (6, 6, 8, 8, 8, 8, 9, 9, 9),
+    (8, 8, 8, 9, 9, 9, 9, 9, 9))
+  grandmaster_tribute_sudoku_snake = ((4, 5), (7, 2))
+  
+  puzzle_joy_sudoku = (#https://www.youtube.com/watch?v=5jZtG5inMPE
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, 7, None),
+    (None, None, 1, 9, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, 8),
+    (None, None, None, None, None, 3, None, 2, None),
+    (None, None, None, None, None, None, 9, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, 8, None, 2, 9, None),
+    (None, None, None, None, 1, 4, None, 3, None))
+  puzzle_joy_sudoku_snake = ((6, 3), (6, 7))
     
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
@@ -3214,6 +3356,9 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
+    snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
+    snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
+    #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
     thermo_sandwich_sudoku(thermo_sandwich_puzzle, thermo_sandwich_puzzle_sandwiches, thermo_sandwich_puzzle_thermos),
     )
   return (
@@ -3263,6 +3408,7 @@ def get_ctc_puzzles():
     little_killer_sudoku(fiendish_little_killer_sudoku, fiendish_little_killer_diagonals),
     killer_cages_sudoku(killer_xxl_sudoku, killer_xxl_sudoku_cages),
     killer_cages_diagonal_sudoku(killer_xxl_impressive_sudoku, killer_xxl_impressive_sudoku_cages),
+    knight_killer_balanced_cages_sudoku(million_dollar_sudoku, million_dollar_sudoku_cages),
     knight_killer_balanced_cages_sudoku(antiknight_killer_sudoku, antiknight_killer_sudoku_cages),
     knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
     knight_killer_cages_even_mirror_magic_square_sudoku(more_magic_sudoku, more_magic_sudoku_killer_cages, more_magic_sudoku_magic_squares, more_magic_sudoku_evens, more_magic_sudoku_mirror_sub_squares),
