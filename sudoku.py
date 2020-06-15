@@ -1254,7 +1254,7 @@ def get_all_mutex_digit_sum(total, digits, value_set):
 def get_all_mutex_digit_group_sum(total, digits, value_sets):
   combs = []
   if len(digits) == 0: return combs if total == 0 else None
-  if total <= 0: return None
+  if total < 0: return None
   for comb in itertools.combinations(value_sets[0], digits[0]):
     innercombs = get_all_mutex_digit_group_sum(total - sum(comb), digits[1:], value_sets[1:])
     if not innercombs is None: combs += [(*comb, *x) for x in innercombs] if len(innercombs) != 0 else [comb]
@@ -1262,7 +1262,7 @@ def get_all_mutex_digit_group_sum(total, digits, value_sets):
 def get_all_mutex_digit_sum_rcrse(total, digits, values): #more efficient due to exclusions
   def get_all_mutex_digit_sum_inner(total, digits, values):
     if digits == 1: return [(total,)] if total in values else []
-    if total <= 0: return []
+    if total < 0: return []
     l, srt = [], list(sorted(values))
     minrem = sum(srt[:digits-1])
     for y in reversed(srt):
@@ -1274,7 +1274,7 @@ def get_all_mutex_digit_sum_sets(total, value_sets, used_values):
   #get_all_mutex_digit_sum_sets(43, [[x for x in range(2, 10)] for _ in range(7)], set((1,)))
   def get_all_mutex_digit_sum_inner(total, value_sets, used_values):
     if len(value_sets) == 1: return [(total,)] if total in value_sets[0] and not total in used_values else []
-    if total <= 0: return []
+    if total < 0: return []
     l = []
     for y in value_sets[0]:
       if not y in used_values:
@@ -1338,7 +1338,7 @@ def min_sum(value_sets, used_values):
   return min(res) if len(res) != 0 else None
 def get_all_mutex_digit_sum_group_sets(total, value_sets, used_values):
   def get_all_mutex_digit_sum_group_inner(total, value_sets, used_values):
-    if total <= 0: return []
+    if total < 0: return []
     if all((len(x)==0 for x in value_sets[1:])) and len(value_sets[0]) == 1: return [(total,)] if total in value_sets[0][0][0] and not total in used_values[0] else []
     if len(value_sets[0]) == 0: return get_all_mutex_digit_sum_group_inner(total, value_sets[1:], used_values[1:])
     l = []
@@ -1349,7 +1349,7 @@ def get_all_mutex_digit_sum_group_sets(total, value_sets, used_values):
   return get_all_mutex_digit_sum_group_inner(total, value_sets, used_values)
 def get_all_mutex_digit_sum_group_sets_balancing(total, value_sets, used_values, used_dict, balance_limit):
   def get_all_mutex_digit_sum_group_inner(total, value_sets, used_values, used_dict):
-    if total <= 0: return []
+    if total < 0: return []
     if sum(1 for k, v in used_dict.items() if v == 2) > balance_limit: return []
     if all((len(x)==0 for x in value_sets[1:])) and len(value_sets[0]) == 1: return [(total,)] if total in value_sets[0][0][0] and not total in used_values[0] else []
     if len(value_sets[0]) == 0: return get_all_mutex_digit_sum_group_inner(total, value_sets[1:], used_values[1:], used_dict)
@@ -1363,7 +1363,7 @@ def has_mutex_digit_sum(total, value_sets, used_values):
   #get_all_mutex_digit_sum_sets(43, [[x for x in range(2, 10)] for _ in range(7)], set((1,)))
   def has_mutex_digit_sum_inner(total, value_sets, used_values):
     if len(value_sets) == 1: return True if total in value_sets[0] and not total in used_values else False
-    if total <= 0: return False
+    if total < 0: return False
     for y in value_sets[0]:
       if not y in used_values:
         if has_mutex_digit_sum_inner(total - y, value_sets[1:], used_values | set((y,))): return True
@@ -2364,6 +2364,19 @@ def killer_cages_sudoku(puzzle, killer):
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
   return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for x, y in killer if x <= sum(value_set) and len(y) <= l]),), (exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), value_set, None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
+def killer_cage_value_set(puzzle, killer, value_set):
+  l = len(puzzle)
+  #killer = [(x+len(y), y) for x, y in killer]; value_set = {x+1 for x in value_set}
+  mutex_rules = standard_sudoku_mutex_regions(l)
+  cvr = (killer_puzzle_gen([(x, y) for x, y in killer if x <= sum(value_set) and len(y) <= l]),)
+  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
+  killergen = best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set)
+  killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
+  #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
+  #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
+  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), value_set, None,
+          (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
+
 def get_mutex_cages(cages, cell_visibility_rules, l, mx=None, maximal=False): #n^2 instead of combinatorics 2^n
   multiples, pairdict = [{(i,) for i in range(len(cages))}, set()], {i:set() for i in range(len(cages))}
   for i, c in enumerate(cages):
@@ -2457,6 +2470,7 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
           cfgroup = sum(gencf[x] for x in j)
           newregion = (sum(x for x, _ in j), combined)
           newcf = cf(newregion)[0]
+          if newcf is None: print(newregion, j)
           if newcf < cfgroup and not newregion in genkiller and not newregion in combinedkiller and (len(newregion[1]) != l or newregion[0] != tot):
             print(newcf, cfgroup, newregion)
             if newcf < cfgroup >> 1:
@@ -3346,6 +3360,26 @@ def get_ctc_puzzles():
     (None, None, None, None, 8, None, 2, 9, None),
     (None, None, None, None, 1, 4, None, 3, None))
   puzzle_joy_sudoku_snake = ((6, 3), (6, 7))
+  
+  sudoku_iq_test_puzzle = ((None,) * 9,) * 9 #https://www.youtube.com/watch?v=6HXLB8V85C8
+  sudoku_iq_test_puzzle_cages = (
+    (17, ((0, 0), (1, 0), (1, 1), (2, 0), (2, 1))),
+    (11, ((0, 2), (0, 3), (1, 3))),
+    (6, ((0, 4), (0, 5))),
+    (12, ((0, 7), (0, 8), (1, 8))),
+    (19, ((1, 4), (2, 2), (2, 3), (2, 4))),
+    (10, ((1, 7), (2, 7), (3, 7), (3, 8))),
+    (3, ((2, 5), (2, 6))),
+    (15, ((3, 3), (4, 3))),
+    (14, ((3, 4), (3, 5), (4, 4), (4, 5))),
+    (18, ((3, 6), (4, 6), (5, 6), (6, 6))),
+    (14, ((4, 1), (5, 0), (5, 1))),
+    (9, ((4, 7), (4, 8), (5, 7), (5, 8))),
+    (24, ((6, 1), (6, 2), (7, 2), (7, 3), (8, 2), (8, 3))),
+    (13, ((6, 4), (6, 5))),
+    (18, ((6, 7), (7, 7), (7, 8), (8, 8))),
+    (9, ((7, 0), (8, 0), (8, 1))),
+    (16, ((7, 4), (7, 5), (8, 4), (8, 5))))
     
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
@@ -3356,6 +3390,7 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
+    killer_cage_value_set(sudoku_iq_test_puzzle, sudoku_iq_test_puzzle_cages, frozenset(range(9))),
     snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
