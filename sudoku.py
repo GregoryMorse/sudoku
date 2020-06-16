@@ -21,6 +21,8 @@ def filter_bounds_points(l, points):
 def orthagonal_points(i, j, l):
   return (frozenset(filter_bounds_points(l, orthagonal_pts(i, j))),)
 def diagonal_pts(i, j): return ((i-1, j-1), (i+1, j-1), (i-1, j+1), (i+1, j+1))
+def diagonal_points_filter(i, j, l):
+  return (frozenset(filter_bounds_points(l, diagonal_pts(i, j))),)  
 def king_rule_pts(i, j): return ((i-1, j-1), (i, j-1), (i+1, j-1), (i-1, j), (i+1, j), (i-1, j+1), (i, j+1), (i+1, j+1))
 def king_rule_points(i, j, l):
   return (frozenset(filter_bounds_points(l, king_rule_pts(i, j))),)
@@ -2144,10 +2146,26 @@ def magic_square_center_to_killer_cages(ms, value_set):
   #        (sm, ((msc[0] - 1, msc[1] - 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] + 1))),
   #        (sm, ((msc[0] - 1, msc[1] + 1), (msc[0], msc[1]), (msc[0] + 1, msc[1] - 1))))
 
+def egg_ominos(egg, ominos, board, remcagesizes):
+  l = len(board)
+  paths = {q:set((egg,)) if q == len(egg) else set() for q in range(len(egg), max(remcagesizes)+1)}
+  for q in range(len(egg), max(remcagesizes)+1):
+    for z in paths[q]:
+      for (x, y) in z:
+        for (i, j) in frozenset.union(*(orthagonal_points(x, y, l))):
+          if board[i][j] or (i, j) in z: continue
+          if board[i][j] == False:
+            nextneighbors = frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),))
+            nextominos = tuple(o for o in ominos if len(nextneighbors.intersection(o)) != 0 and o != egg)
+            omadd = sum(len(o) for o in nextominos)
+            if q + omadd + 1 <= max(remcagesizes): paths[q + omadd + 1].add(frozenset((*z, (i, j), *(p for o in nextominos for p in o))))
+  return {x:y for x,y in paths.items() if x in remcagesizes and len(y) != 0}
 def exclude_snake_egg_rule_gen(snake, cagesizes):
   def exclude_snake_egg_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     possible, l = [], len(rem)
+    mins, _ = get_min_max_sums(value_set)
     snakerem = [[(i, j) in snake for j in range(len(x))] for i, x in enumerate(rem)] #True for snake, False for undetermined, None for not snake
+    snakelen = l * l - sum(cagesizes)
     onlysnake = value_set.difference(cagesizes)
     ominodict = {}
     ominos = []
@@ -2164,7 +2182,6 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
       for y in range(l):
         if rem[x][y].issubset(onlysnake):
           if snakerem[x][y] == False: snakerem[x][y] = True
-    """
     truesnake = (
       (0, 1, 1, 1, 1, 0, 1, 1, 1),
       (1, 1, 0, 0, 1, 0, 1, 0, 1),
@@ -2175,28 +2192,58 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
       (1, 1, 1, 0, 1, 0, 0, 1, 0),
       (0, 0, 1, 0, 1, 0, 0, 1, 0),
       (0, 0, 0, 0, 1, 1, 1, 1, 0))
-    snakerem[3][3] = None; add_to_ominos(3, 3)
-    snakerem[2][5] = None; add_to_ominos(2, 5)
+    #snakerem[2][5] = None; add_to_ominos(2, 5)
     """
-    snakerem[4][7] = None; add_to_ominos(4, 7)
-    snakerem[8][7] = True
-    snakerem[7][4] = None; add_to_ominos(7, 4)
+    truesnake = (
+      (1, 1, 1, 1, 1, 1, 0, 0, 0),
+      (1, 0, 0, 0, 0, 1, 1, 1, 1),
+      (1, 1, 1, 1, 1, 0, 0, 0, 1),
+      (0, 0, 0, 0, 1, 0, 1, 1, 1),
+      (0, 1, 1, 1, 1, 0, 1, 0, 0),
+      (0, 1, 0, 0, 0, 1, 1, 0, 0),
+      (1, 1, 0, 1, 0, 1, 0, 1, 0),
+      (1, 0, 1, 1, 0, 1, 0, 1, 0),
+      (1, 1, 1, 0, 0, 1, 1, 1, 0))
+    """
     while True:
       progress = False
+      headtail = []
       for x, y in snake:
         neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
-        if any(snakerem[i][j] for i, j in neighbors):
+        snakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == True)
+        notsnakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == False)
+        if snakeneigh == 1:
           for i, j in neighbors:
             if snakerem[i][j] == False: snakerem[i][j] = None; add_to_ominos(i, j); progress = True
+        if snakeneigh == 0 and notsnakeneigh == 1:
+          for i, j in neighbors:
+            if snakerem[i][j] == False: snakerem[i][j] = True; progress = True
+        ht = [(x, y)]
+        while True:
+          nxt = {(i, j) for i, j in frozenset.union(*(orthagonal_points(x, y, l))) if snakerem[i][j]}.difference(ht)
+          if len(nxt) == 0: break
+          ht.append(next(iter(nxt)))
+          x, y = ht[-1]
+        headtail.append(ht)
+      htdiag = frozenset.intersection(frozenset.union(*(diagonal_points_filter(headtail[0][-1][0], headtail[0][-1][1], l))), frozenset.union(*(diagonal_points_filter(headtail[1][-1][0], headtail[1][-1][1], l))))
+      if len(htdiag) == 1 and len(headtail[0]) + len(headtail[1]) + 3 != snakelen:
+        x, y = next(iter(htdiag))
+        if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
       for x in range(l):
         for y in range(l):
           if (x, y) in snake: continue
           neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
           if sum(1 for i, j in neighbors if snakerem[i][j] is None) == len(neighbors) - 1:
             if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
-          elif len(neighbors) == 2 and (all(snakerem[i][j] == False for i, j in neighbors) or all(snakerem[i][j] == True for i, j in neighbors)):
+          elif len(neighbors) == 2 and (all(snakerem[i][j] == False for i, j in neighbors)): # or all(snakerem[i][j] == True for i, j in neighbors)):
             i, j = next(iter(frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in neighbors)) - frozenset(((x, y),)))) #diagonal point
             if snakerem[i][j] and snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
+          elif sum(1 for i, j in neighbors if snakerem[i][j]) >= 2:
+            for comb in itertools.combinations((frozenset.union(*(orthagonal_points(i, j, l))) for i, j in neighbors if snakerem[i][j]), 2):
+              diags = frozenset.intersection(*comb)
+              if len(diags) == 2:
+                i, j = next(iter(diags - frozenset(((x, y),))))
+                if snakerem[i][j] and snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
           if snakerem[x][y]:
             snakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == True)
             notsnakeneigh = sum(1 for i, j in neighbors if snakerem[i][j] == False)
@@ -2206,14 +2253,15 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
             elif snakeneigh == 2:
               for i, j in neighbors:
                 if snakerem[i][j] == False: snakerem[i][j] = None; add_to_ominos(i, j); progress = True
-      for omino in ominos:        
+      for omino in ominos.copy():        
         #if surrounded remove from remaining cage sizes
         border = get_path_boundary(omino, l)
         openborder = [(x, y) for x, y in border if snakerem[x][y] == False]
         mn, mx = max(min(rem[x][y]) for x, y in omino), min(max(rem[x][y]) for x, y in omino)
         if len(openborder) == 1 and len(omino) < mn:
           for x, y in openborder:
-            snakerem[x][y] = None; add_to_ominos(x, y); progress = True            
+            snakerem[x][y] = None; add_to_ominos(x, y); progress = True
+          if progress: break
         if all(snakerem[x][y] for x, y in border):
           if len(omino) in remcagesizes:
             remcagesizes.remove(len(omino)); onlysnake = value_set if len(remcagesizes) == 0 else {x for x in value_set if x > max(remcagesizes)}
@@ -2221,7 +2269,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
               for y in range(l):
                 if rem[x][y].issubset(onlysnake):
                   if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
-        elif len(omino) == max(remcagesizes) or len(omino) == min(remcagesizes) and len(ominos) == len(cagesizes) and sum(1 for o in ominos if len(o) <= len(omino)) <= len(omino):
+        elif len(omino) == max(remcagesizes): # or len(omino) == min(remcagesizes) and len(ominos) == len(cagesizes) and sum(1 for o in ominos if len(o) <= len(omino)) <= len(omino):
           for x, y in border:
             if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
         elif len(omino) == max(remcagesizes) - 1:
@@ -2233,11 +2281,69 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
         elif len(omino) == max(remcagesizes) - 2:
           for j in itertools.combinations(openborder, 2): #must consider and exclude all cases first
             pass
-      #if not all([all([True if y is False else (1 if y else 0) == truesnake[i][j] for j, y in enumerate(x)]) for i, x in enumerate(snakerem)]):
-        #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
-        #raise ValueError
+        #ultimately must generate all polyominos of remcagesizes lengths, look for common intersections
+        #sum of first n numbers is (x * (x + 1)) >> 1 but would assume value_set
+        def res_none(r): return 0 if r is None else r[0]
+        def check_border_egg(egg):
+          border = get_path_boundary(egg, l)
+          #check if snake touches itself orthagonally or creates a new head/tail
+          for x, y in border:
+            neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
+            inborder = neighbors.intersection(border) | {n for n in neighbors if snakerem[n[0]][n[1]]}
+            inegg = neighbors.intersection(egg) | {n for n in neighbors if snakerem[n[0]][n[1]] is None}
+            notdef = neighbors - inborder - inegg
+            if len(inborder) == 3: return False
+            if len(inborder) == 2:
+              diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in inborder))
+              if len(diags) == 2:
+                i, j = next(iter(diags - frozenset(((x, y),))))
+                if snakerem[i][j]: return False
+              else:
+                if any(sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),))) == 2 for i, j in inborder): return False
+            if len(inborder) == 1 and len(notdef) == 1:
+              diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in inborder | notdef))
+              if len(diags) == 2:
+                i, j = next(iter(diags - frozenset(((x, y),))))
+                if snakerem[i][j]: return False
+              i, j = next(iter(notdef))
+              if sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),))) == 2: return False
+            if len(notdef) == 2: #only 2 points for border and one is a corner
+              for pt in notdef:
+                if len(frozenset.union(*(orthagonal_points(pt[0], pt[1], l)))) == 2 and sum(1 if (i, j) in egg else 0 for i, j in frozenset.union(*(orthagonal_points(pt[0], pt[1], l)))) == 1: return False
+              #diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in notdef))
+              #if len(diags) == 2:
+              #  i, j = next(iter(diags - frozenset(((x, y),))))
+              #  if sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l)))) == 1 and len(frozenset.union(*(orthagonal_points(i, j, l)))) == 3: return False
+            if len(inegg) == 4 or (len(inegg) == 3 or len(inegg) == 2 and len(neighbors) == 3) and not (x, y) in snake: return False #bad head/tail induced
+          return True
+        if len(openborder) != 0 and not progress:
+          potominos = {x:{z for z in y if res_none(min_sum_efficient([rem[p][q] for p, q in z])) == mins[x-1] and check_border_egg(z)} for x,y in egg_ominos(omino, ominos, snakerem, remcagesizes).items()}
+          nakeds = [pt for o in ominos for pt in o if len(rem[pt[0]][pt[1]]) == 1]
+          nakeddict = {y:{pt for pt in nakeds if next(iter(rem[pt[0]][pt[1]])) == y} for y in range(1, len(cagesizes)+1)}
+          potominos = {x:{z for z in y if len(nakeddict[x]) != len(cagesizes) - x + 1 or len(nakeddict[x].intersection(z)) != 0} for x, y in potominos.items()}
+          #print(potominos, ominos, omino)
+          #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+          #if (4, 4) in omino: print(potominos)
+          for x, y in frozenset.intersection(*(u for v in potominos.values() for u in v)).difference(omino):
+            if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
+          if progress: break
+          for x, y in set.intersection(*(get_path_boundary(u, l) for v in potominos.values() for u in v)):
+            if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
+          #if len(potominos) == 1: pass        
+      nakeds = [pt for o in ominos for pt in o if len(rem[pt[0]][pt[1]]) == 1]
+      for y in range(1, len(cagesizes)+1):
+        points = [pt for pt in nakeds if next(iter(rem[pt[0]][pt[1]])) == y]
+        if len(points) == len(cagesizes) - y + 1:
+          for i in range(l):
+            for j in range(l):
+              if len(rem[i][j]) == 1 and next(iter(rem[i][j])) == y:
+                if snakerem[i][j] == False: snakerem[i][j] = True; progress = True
+      if not all([all([True if y is False else (1 if y else 0) == truesnake[i][j] for j, y in enumerate(x)]) for i, x in enumerate(snakerem)]):
+        print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+        raise ValueError
       if not progress: break
     print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+    #print(tuple(tuple(0 if y is None else int(y) for y in x) for x in snakerem))
     #print(ominos, remcagesizes)
     eggs = []
     exclude = []
@@ -2252,8 +2358,11 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
     def egg_exclusion_visibility(i, j, rem, y):
       for egg in eggs:
         if (i, j) in egg: return frozenset(egg) - frozenset(((i, j),))
-      return frozenset()
+      return frozenset()    
     possible.extend(naked_single(rem, mutex_rules, cell_visibility_rules, value_set, egg_exclusion_visibility))
+    possible.extend(locked_candidates(rem, mutex_rules, cell_visibility_rules, value_set, egg_exclusion_visibility))
+    possible.extend(hidden_single(rem, mutex_rules, cell_visibility_rules, value_set, lambda l: eggs))
+    #possible.extend(x_chain(rem, mutex_rules, cell_visibility_rules, value_set, egg_exclusion_visibility))
     return possible
   return exclude_snake_egg_rule
 def check_puzzle(y):
@@ -3390,9 +3499,8 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
-    killer_cage_value_set(sudoku_iq_test_puzzle, sudoku_iq_test_puzzle_cages, frozenset(range(9))),
-    snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
+    snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
     thermo_sandwich_sudoku(thermo_sandwich_puzzle, thermo_sandwich_puzzle_sandwiches, thermo_sandwich_puzzle_thermos),
     )
@@ -3441,6 +3549,7 @@ def get_ctc_puzzles():
     partial_border_jigsaw_sudoku(prize_sudoku, prize_sudoku_subsquare_exc),
     partial_border_diagonal_thermo_sudoku(nightmare_sudoku, nightmare_sudoku_subsquare_exc, nightmare_sudoku_thermo),
     little_killer_sudoku(fiendish_little_killer_sudoku, fiendish_little_killer_diagonals),
+    killer_cage_value_set(sudoku_iq_test_puzzle, sudoku_iq_test_puzzle_cages, frozenset(range(9))),
     killer_cages_sudoku(killer_xxl_sudoku, killer_xxl_sudoku_cages),
     killer_cages_diagonal_sudoku(killer_xxl_impressive_sudoku, killer_xxl_impressive_sudoku_cages),
     knight_killer_balanced_cages_sudoku(million_dollar_sudoku, million_dollar_sudoku_cages),
