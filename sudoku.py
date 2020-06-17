@@ -2307,13 +2307,21 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
                 if snakerem[i][j]: return False
               i, j = next(iter(notdef))
               if sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),))) == 2: return False
+              elif sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),))) == 1:
+                alsonotdef = frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),)) - {pt for pt in frozenset.union(*(orthagonal_points(i, j, l))) - frozenset(((x, y),)) if pt in border or snakerem[pt[0]][pt[1]]}
+                diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in alsonotdef)) if len(alsonotdef) != 0 else frozenset()
+                if len(diags) == 2:
+                  i, j = next(iter(diags - frozenset(((x, y),))))
+                  if snakerem[i][j] and sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l)))) == 1 and len(frozenset.union(*(orthagonal_points(i, j, l)))) == 3:
+                    return False
             if len(notdef) == 2: #only 2 points for border and one is a corner
               for pt in notdef:
                 if len(frozenset.union(*(orthagonal_points(pt[0], pt[1], l)))) == 2 and sum(1 if (i, j) in egg else 0 for i, j in frozenset.union(*(orthagonal_points(pt[0], pt[1], l)))) == 1: return False
-              #diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in notdef))
-              #if len(diags) == 2:
-              #  i, j = next(iter(diags - frozenset(((x, y),))))
-              #  if sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l)))) == 1 and len(frozenset.union(*(orthagonal_points(i, j, l)))) == 3: return False
+              diags = frozenset.intersection(*(frozenset.union(*(orthagonal_points(i, j, l))) for i, j in notdef))
+              if len(diags) == 2:
+                i, j = next(iter(diags - frozenset(((x, y),))))
+                if snakerem[i][j] and sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l)))) == 1 and len(frozenset.union(*(orthagonal_points(i, j, l)))) == 3:
+                  return False
             if len(inegg) == 4 or (len(inegg) == 3 or len(inegg) == 2 and len(neighbors) == 3) and not (x, y) in snake: return False #bad head/tail induced
           return True
         if len(openborder) != 0 and not progress:
@@ -2323,7 +2331,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
           potominos = {x:{z for z in y if len(nakeddict[x]) != len(cagesizes) - x + 1 or len(nakeddict[x].intersection(z)) != 0} for x, y in potominos.items()}
           #print(potominos, ominos, omino)
           #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
-          #if (4, 4) in omino: print(potominos)
+          if (4, 4) in omino: print(potominos)
           for x, y in frozenset.intersection(*(u for v in potominos.values() for u in v)).difference(omino):
             if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
           if progress: break
@@ -2368,7 +2376,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
 def check_puzzle(y):
   rem, solve_path, border = solve_sudoku(y[0], y[1], y[2], y[3], y[4], y[5])
   rem, valid = check_sudoku(rem, y[1], y[4])
-  print(logical_solve_string(solve_path, y[1]))
+  #print(logical_solve_string(solve_path, y[1]))
   if not rem is None:
     y[6][0](rem) if y[5] is None else y[6][0](rem, border)
     if not valid:
@@ -2642,6 +2650,15 @@ def knight_killer_balanced_cages_sudoku(puzzle, killer):
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
   return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen), exclude_cage_hidden_tuple_rule_gen([y for _, y in cages]), exclude_cage_mirror_rule_gen([y for _, y in cages])), value_set, None,
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
+def four_diagonals_sudoku(puzzle):
+  l = len(puzzle)
+  diagonal_regions = (
+    (frozenset(((l >> 1, l >> 1), *((i, i+1) for i in range(l-1)))),),
+    (frozenset(((l >> 1, l >> 1), *((i+1, i) for i in range(l-1)))),),
+    (frozenset(((l >> 1, l >> 1), *((i, l-i-1-1) for i in range(l-1)))),),
+    (frozenset(((l >> 1, l >> 1), *((i+1, l-i-1) for i in range(l-1)))),))
+  print((*standard_sudoku_mutex_regions(l), *diagonal_regions))
+  return (puzzle, (*standard_sudoku_mutex_regions(l), *diagonal_regions), (), (), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
 def killer_cages_diagonal_sudoku(puzzle, killer):
   l = len(puzzle)
   #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
@@ -3489,7 +3506,18 @@ def get_ctc_puzzles():
     (18, ((6, 7), (7, 7), (7, 8), (8, 8))),
     (9, ((7, 0), (8, 0), (8, 1))),
     (16, ((7, 4), (7, 5), (8, 4), (8, 5))))
-    
+  
+  invisible_digits_sudoku = ( #https://www.youtube.com/watch?v=l5KAG11pDbc
+    (None, None, None, 3, None, None, None, None, None),
+    (None, None, None, None, None, None, 3, 1, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, 7, 5, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, 2, None, None, 9, None, None, 4),
+    (None, 4, None, None, None, None, None, 3, None),
+    (None, None, None, None, None, None, 6, None, None),
+    (None, None, None, None, None, None, None, None, None))
+  
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
   #print_border(add_region([[None] * 6 for _ in range(6)], max_region(region_ominos((3, 3), [[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc))[0], 1), prize_sudoku_subsquare_exc)
@@ -3499,6 +3527,7 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
+    four_diagonals_sudoku(invisible_digits_sudoku),
     snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
