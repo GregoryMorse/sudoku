@@ -1729,7 +1729,7 @@ def exclude_battlefield_rule_gen(fields):
         if len(exclude) != 0: possible.append((exclude, BATTLEFIELD_RULE, ()))
     return possible
   return exclude_battlefield_rule
-def exclude_renban_rule_gen(cages):
+def exclude_renban_rule_gen(cages, distance=1):
   def exclude_renban_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
     for cagesets in cages:
@@ -1738,7 +1738,8 @@ def exclude_renban_rule_gen(cages):
         prods = []
         common = value_set.copy()
         for prod in itertools.product(*[rem[pt[0]][pt[1]] for pt in cells]): #such complexity is not required
-          if len(set(prod)) == len(cells) and not (renban ^ (max(prod) - min(prod) + 1 == len(cells))):
+          if len(set(prod)) != len(cells): continue
+          if distance == 1 and not (renban ^ (max(prod) - min(prod) + 1 == len(cells))) or distance != 1 and not (renban ^ all(abs(prod[i]-prod[i+1]) == distance for i in range(len(prod)-1))):
             common = common.intersection(prod)
             prods.append(prod)
         allprods.append(prods); allcommon.append(common)
@@ -1750,11 +1751,15 @@ def exclude_renban_rule_gen(cages):
             possibles[i].add(x)
         allposs.append(possibles)
       exclude = []
+      alreadypts = set()
       for k, (_, cells) in enumerate(cagesets):
         for i, pt in enumerate(cells):
+          if pt in alreadypts: continue
+          alreadypts.add(pt)
           for y in rem[pt[0]][pt[1]].difference(allposs[k][i]):
             exclude.append((pt[0], pt[1], y))
-      if len(exclude) != 0: possible.append((exclude, RENBAN_RULE, ()))      
+      if len(exclude) != 0: possible.append((exclude, RENBAN_RULE, ()))
+      
       for k, (_, cells) in enumerate(cagesets):
         for c in allcommon[k]:
           commonpts = [pt for pt in cells if c in rem[pt[0]][pt[1]]]
@@ -2087,28 +2092,28 @@ def exclude_manhattan_rule_gen(taxis, max_subset):
 def exclude_mirror_gen(mirrors):
   def exclude_mirror(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
-    for p, q in mirrors:
+    for m in mirrors:
       exclude = []
-      inc = rem[p[0]][p[1]].intersection(rem[q[0]][q[1]])
-      for y in rem[p[0]][p[1]] - inc:
-        exclude.append((p[0], p[1], y))
-      for y in rem[q[0]][q[1]] - inc:
-        exclude.append((q[0], q[1], y))
+      inc = set.intersection(*(rem[pt[0]][pt[1]] for pt in m))
+      for pt in m:
+        for y in rem[pt[0]][pt[1]] - inc:
+          exclude.append((pt[0], pt[1], y))
       if len(exclude) != 0: possible.append((exclude, MIRROR_RULE, ()))
       else: #rem[p[0]][p[1]] == rem[q[0]][q[1]]
         #cage mirror rule - technically all combinations of disconnected jigsaws could be generated but complexity is too absurd
-        comb = cell_visibility(p[0], p[1], l, cell_visibility_rules).union(cell_visibility(q[0], q[1], l, cell_visibility_rules))
-        for regions in mutex_rules:
-          for region in regions:
-            intsct = comb.intersection(region)
-            if len(region - intsct) == 0 or len(intsct) == 0: continue
-            pts = [pt for pt in region - intsct if len(rem[p[0]][p[1]].intersection(rem[pt[0]][pt[1]])) != 0]
-            exclude = []
-            if len(pts) == 1:
-              #print(rem[p[0]][p[1]], pts, rem[pts[0][0]][pts[0][1]])
-              for y in rem[pts[0][0]][pts[0][1]] - rem[p[0]][p[1]]:
-                exclude.append((pts[0][0], pts[0][1], y))
-            if len(exclude) != 0: possible.append((exclude, MIRROR_RULE, ()))
+        for p, q in itertools.combinations(m, 2):
+          comb = cell_visibility(p[0], p[1], l, cell_visibility_rules).union(cell_visibility(q[0], q[1], l, cell_visibility_rules))
+          for regions in mutex_rules:
+            for region in regions:
+              intsct = comb.intersection(region)
+              if len(region - intsct) == 0 or len(intsct) == 0: continue
+              pts = [pt for pt in region - intsct if len(rem[p[0]][p[1]].intersection(rem[pt[0]][pt[1]])) != 0]
+              exclude = []
+              if len(pts) == 1:
+                #print(rem[p[0]][p[1]], pts, rem[pts[0][0]][pts[0][1]])
+                for y in rem[pts[0][0]][pts[0][1]] - rem[p[0]][p[1]]:
+                  exclude.append((pts[0][0], pts[0][1], y))
+              if len(exclude) != 0: possible.append((exclude, MIRROR_RULE, ()))
     return possible
   return exclude_mirror
 def mirror_visibility_gen(mirrors, mutex_rules, cell_visibility_rules):
@@ -2667,8 +2672,11 @@ def killer_cages_diagonal_sudoku(puzzle, killer):
           (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
 def renban_sudoku(puzzle, cages):
   l = len(puzzle) #exclude_cage_mirror_rule_gen(cages)
-  return (puzzle, standard_sudoku_mutex_regions(l), (jigsaw_points_gen(cages),), (exclude_renban_rule_gen(cages), exclude_cage_hidden_tuple_rule_gen(cages),), frozenset(range(1, l+1)), None,
+  return (puzzle, standard_sudoku_mutex_regions(l), (jigsaw_points_gen(cages),), (exclude_renban_rule_gen([[(True, c)] for c in cages]), exclude_cage_hidden_tuple_rule_gen(cages),), frozenset(range(1, l+1)), None,
           (lambda x: print_border(x, exc_from_border(cages_to_jigsaw(cages, l), set())), lambda x: print_candidate_border(x, exc_from_border(cages_to_jigsaw(cages, l), set()))))
+def rose_violet_sudoku(puzzle, roses, violets):
+  l = len(puzzle) #exclude_cage_mirror_rule_gen(cages)
+  return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_renban_rule_gen([[(True, c)] for c in violets], distance=2), exclude_renban_rule_gen([[(True, (c[i], c[i+1])) for i in range(len(c)-1)] for c in roses])), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
 def renban_killer_clue_combos(clue, cagesize, value_set, renban):
   odds, evens = {1, 3, 5, 7, 9}, [{2, 4, 6, 8}, {0, 2, 4, 6, 8}]
   mins, maxes = get_min_max_sums(value_set)
@@ -2775,6 +2783,12 @@ def knight_killer_cages_even_mirror_magic_square_sudoku(puzzle, killer_cages, ma
   killers = [magic_square_center_to_killer_cages(x, frozenset(range(1, l+1))) for x in ms]
   mirrors = tuple(zip(*(sorted(get_sub_square_points(sub_square_from_point(m[0], m[1], l), l)) for x in mirror_sub_squares for m in x)))
   return (puzzle, standard_sudoku_mutex_regions(l), (knight_rule_points,mirror_visibility_gen(mirrors, standard_sudoku_mutex_regions(l), (knight_rule_points,))), (exclude_magic_square_rule_gen(ms), *(exclude_killer_rule_gen(killer) for killer in killers), exclude_killer_rule_gen(killer_cages), exclude_even_odd_gen(evens, True), exclude_mirror_gen(mirrors)), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def royal_clone_sudoku(puzzle, cages, mirror_sub_squares):
+  l = len(puzzle)
+  mirrors = tuple(zip(*(sorted(get_sub_square_points(sub_square_from_point(m[i], m[j], l), l)) for x in mirror_sub_squares for m in x for i, j in itertools.combinations(tuple(range(len(m))), 2))))
+  print(mirrors)
+  return (puzzle, standard_sudoku_mutex_regions(l), (king_rule_points,mirror_visibility_gen(mirrors, standard_sudoku_mutex_regions(l), (king_rule_points,))), (exclude_killer_rule_gen(cages), exclude_mirror_gen(mirrors)), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+  
 def fibonacci_rule_sudoku(puzzle, cages):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_fibonacci_rule_gen(cages),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
@@ -3517,6 +3531,54 @@ def get_ctc_puzzles():
     (None, 4, None, None, None, None, None, 3, None),
     (None, None, None, None, None, None, 6, None, None),
     (None, None, None, None, None, None, None, None, None))
+    
+  rose_one_violet_two_sudoku = ( #https://www.youtube.com/watch?v=asfGvGhrtrc
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, 6, None))
+  rose_one_violet_two_sudoku_roses = (
+    ((0, 3), (1, 2), (2, 1), (3, 0)),
+    ((4, 0), (3, 1), (3, 2), (4, 3), (5, 3)),
+    ((2, 4), (3, 3), (3, 4)),
+    ((4, 4), (5, 4), (5, 5), (6, 4)),
+    ((4, 7), (5, 6)),
+    ((6, 7), (7, 6)))
+  rose_one_violet_two_sudoku_violets = (
+    ((0, 6), (0, 7), (0, 8), (1, 8), (2, 8)),
+    ((1, 4), (1, 5), (1, 6), (1, 7)),
+    ((6, 0), (7, 0), (8, 0), (8, 1), (8, 2)),
+    ((7, 1), (7, 2), (7, 3), (7, 4)))
+  
+  royal_clone_sudoku_puzzle = ( #https://www.youtube.com/watch?v=wLo-r4V75d4
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, 4, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (8, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None))
+  royal_clone_sudoku_cages = (
+    (17, ((1, 1), (1, 2), (2, 0), (2, 1), (2, 2))),
+    (17, ((3, 4), (4, 4), (5, 4))),
+    (6, ((3, 5), (4, 5))),
+    (13, ((4, 3), (5, 3))),
+    (35, ((6, 6), (6, 7), (6, 8), (7, 6), (7, 7))))
+  royal_clone_sudoku_mirror_sub_squares = (((1, 1), (4, 4), (7, 7)),)
+  
+  nonograms_cross_the_streams_grant = (
+    ((2, 1), ('?', '?', '?'), ('*',), ('?', '?', '?', '?', '?'), (5, '*'), ('*', 1), (3, '?', '?', 2), ('?',), ('?', 4, 3), ('*',)),
+    ((2, 2, '?'), ('*', 3, '*'), ('*',), ('*',), ('*',), ('*',), (4, '*'), ('*',), (4, '*'), (3,)))
+  nonograms_cross_the_streams_murat = (
+    (('*', 1, '*', 2, '*'), ('*', 3, '*'), ('*', 4), ('*', 5, '*'), ('*', 2, 1, '*'), ('*', 2, 3, '*'), ('*', 5, '*'), ('*', 4), ('*', 2, '*'), ('*', 1, '*', 3, '*')),
+    ((2, '*'), (5, '*'), ('*', 4, 3, '*'), (2, '*'), ('*', 2, '*', 2, '*'), ('*', 1, '*', 1, '*'), (2, '*'), ('*', 3, 1, '*'), (3, '*'), (4, '*')))
   
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
@@ -3527,7 +3589,7 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
-    four_diagonals_sudoku(invisible_digits_sudoku),
+    rose_violet_sudoku(rose_one_violet_two_sudoku, rose_one_violet_two_sudoku_roses, rose_one_violet_two_sudoku_violets),
     snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
@@ -3545,6 +3607,7 @@ def get_ctc_puzzles():
     standard_sudoku(hardest_sudoku),
     standard_sudoku(extreme_sudoku),
     standard_sudoku(classic_technique_sudoku),
+    four_diagonals_sudoku(invisible_digits_sudoku),
     arrow_sudoku(fibo_series_two_sudoku, fibo_series_two_arrows, False),
     sandwich_arrow_sudoku(excellence_elegance_sudoku, excellence_elegance_arrows, True, excellence_elegance_sandwich_row_cols),
     sandwich_sudoku(slippery_sandwich_sudoku, slippery_sandwich_row_cols),
@@ -3585,6 +3648,7 @@ def get_ctc_puzzles():
     knight_killer_balanced_cages_sudoku(antiknight_killer_sudoku, antiknight_killer_sudoku_cages),
     knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
     knight_killer_cages_even_mirror_magic_square_sudoku(more_magic_sudoku, more_magic_sudoku_killer_cages, more_magic_sudoku_magic_squares, more_magic_sudoku_evens, more_magic_sudoku_mirror_sub_squares),
+    royal_clone_sudoku(royal_clone_sudoku_puzzle, royal_clone_sudoku_cages, royal_clone_sudoku_mirror_sub_squares)
     )
 
 def get_impossible_puzzles():
