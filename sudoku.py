@@ -1,5 +1,6 @@
 #import os; exec(open(os.path.join('D:', 'Source', 'Repos', 'sudoku', 'sudoku.py')).read())
 #CD /D D:\Source\Repos\sudoku
+#set PATH=%PATH%;C:\Users\Gregory\Desktop\Apps\ffmpeg-20200315-c467328-win64-static\bin;C:\program files\MiKTeX 2.9\miktex\bin\x64
 #"%ProgramFiles%\Python37\scripts\manim" sudoku.py Sudoku -pl
 #"%ProgramFiles%\Python37\scripts\manim" sudoku.py Sudoku -pp
 #https://www.sudokuwiki.org/sudoku.htm
@@ -15,6 +16,207 @@
 #cProfile.run('check_puzzle(get_ctc_puzzles()[0])')
 import itertools
 
+def uprod(*seqs):
+    def inner(i):
+        if i == n:
+            yield tuple(result)
+            return
+        for elt in sets[i] - seen:
+            seen.add(elt)
+            result[i] = elt
+            for t in inner(i+1):
+                yield t
+            seen.remove(elt)
+
+    sets = [set(seq) for seq in seqs]
+    n = len(sets)
+    seen = set()
+    result = [None] * n
+    for t in inner(0):
+        yield t
+def mirror_sudoku(sudoku, axis): #axis=0 for x-axis, 1 for y-axis
+  if axis == 0: return tuple(tuple(reversed(x)) for x in sudoku)
+  elif axis == 1: return tuple(reversed(sudoku))
+def rotate_sudoku(sudoku, degree): #degree=0 for 90 degrees, 1 for 180 degrees, 2 for 270 degrees
+  l = len(sudoku)
+  if degree == 0: return tuple(tuple(sudoku[l-1-j][i] for j in range(len(sudoku[i]))) for i in range(l))
+  elif degree == 1: return tuple(tuple(sudoku[l-1-i][l-1-j] for j in range(len(sudoku[i]))) for i in range(l))
+  elif degree == 2: return tuple(tuple(sudoku[j][l-1-i] for j in range(len(sudoku[i]))) for i in range(l))
+def transpose_sudoku(sudoku): #x=y diagonal
+  return tuple(tuple(sudoku[j][i] for j in range(len(sudoku[i]))) for i in range(len(sudoku)))
+def get_val_points(sudoku, value_set):
+  valdict = {c:set() for c in value_set}
+  for i, r in enumerate(sudoku):
+    for j, c in enumerate(r):
+      valdict[c].add((i, j))
+  return frozenset(frozenset(x) for x in valdict.values())
+#https://www.sciencedirect.com/science/article/pii/S0012365X14001824
+def is_isotopic_latin_square(square, uniquevals, value_set):
+  l, newvals = len(square), set()
+  for rperm in itertools.permutations(square):
+    for cperm in itertools.permutations(range(l)):
+      valset = get_val_points([[x[cperm[i]] for i in range(len(cperm))] for x in rperm], value_set)
+      if valset in uniquevals: return False
+      newvals.add(valset)
+  uniquevals |= newvals
+  return True
+def swap_row_value(square):
+  rem = [[None for _ in range(len(x))] for x in square]
+  for i, x in enumerate(square):
+    for j in range(len(x)):
+      rem[x[j]-1][j] = i + 1
+  return rem
+def swap_col_value(square):
+  rem = [[None for _ in range(len(x))] for x in square]
+  for i, x in enumerate(square):
+    for j, y in enumerate(x):
+      rem[i][y - 1] = j + 1
+  return rem
+def is_mainclass_latin_square(square, uniquevals, value_set): #main class must consider diagonal transposition and values for rows/columns with transpositions for 6 possible additions
+  transpose = transpose_sudoku(square)
+  #if not is_isotopic_latin_square(square, newvals, value_set): return False
+  if not is_isotopic_latin_square(transpose, uniquevals.copy(), value_set): return False
+  #swap row/values, transpose it
+  if not is_isotopic_latin_square(swap_row_value(square), uniquevals.copy(), value_set): return False
+  if not is_isotopic_latin_square(swap_row_value(transpose), uniquevals.copy(), value_set): return False  
+  #swap column/values, transpose it
+  if not is_isotopic_latin_square(swap_col_value(square), uniquevals.copy(), value_set): return False
+  if not is_isotopic_latin_square(swap_col_value(transpose), uniquevals.copy(), value_set): return False
+  return True
+def is_essentially_unique_sudoku(sudoku, uniquevals, value_set, bandstack):
+  l, newvals = len(sudoku), set()
+  for r in (sudoku, transpose_sudoku(sudoku)) if bandstack[0] == bandstack[1] else (sudoku,):
+    for bandperm in itertools.permutations(range(bandstack[0])):
+      for stackperm in itertools.permutations(range(bandstack[1])):
+        for rperm in itertools.product(*([tuple(itertools.permutations(range(bandstack[2])))] * bandstack[0])):
+          for cperm in itertools.product(*([tuple(itertools.permutations(range(bandstack[3])))] * bandstack[1])):
+            valset = get_val_points([[r[bandperm[i // bandstack[2]] * bandstack[2] + rperm[bandperm[i // bandstack[2]]][i % bandstack[2]]][stackperm[j // bandstack[3]] * bandstack[3] + cperm[stackperm[j // bandstack[3]]][j % bandstack[3]]] for j in range(len(sudoku[i]))] for i in range(l)], value_set)
+            if valset in uniquevals: return False
+            newvals.add(valset)
+  uniquevals |= newvals
+  return True
+#https://en.wikipedia.org/wiki/Latin_square
+#http://pi.math.cornell.edu/~mec/Summer2009/Mahmood/Four.html
+#http://www.afjarvis.staff.shef.ac.uk/sudoku/
+#latin_squares(1): 1 {0: 1, 1: 0} 1 1 1 1
+#latin_squares(2): 2 {0: 0, 1: 0, 2: 0} 1 1 1 0
+#latin_squares(3): 12 {0: 0, 1: 0, 2: 0, 3: 0} 1 1 1 0
+#latin_squares(4): 576 {0: 288, 1: 0, 2: 0, 3: 0, 4: 288} 4 2 2 2
+#latin_squares(5): 161280 {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0} 56 2 2 0
+#latin_squares(6): 812851200 {0: 28200960, 1: 0, 2: 0, 3: 0, 4: 253808640, 5: 0, 6: 530841600} 9408 22 12 49
+def latin_squares(l): #4x4 sudoku has only 0 and 4 bad house combinations, 9x9 theoretically has only 0, 4, 6, 7, 8, 9 where 1-7 are not yet confirmed
+  count, found = 0, set()
+  housedict = {x:0 for x in range(l+1)}
+  uniquesudoku, uqsudoku, uqls, uniquels, mainclassls = set(), set(), set(), set(), set()
+  reducedls = 0
+  if l == 6: houses, bandstack = get_rects(l // 3, l // 2, l), (l // 3, l // 2, 3, 2)
+  elif l == isqrt(l) * isqrt(l): houses, bandstack = tuple(get_sub_square_points(i, l) for i in range(l)), (isqrt(l), isqrt(l), isqrt(l), isqrt(l))
+  else: houses, bandstack = None, None
+  def gen_latin_squares(rows, sets):
+    nonlocal count, reducedls
+    if len(rows) == l:
+      #valid_ls = all(len(set(c)) == l for c in zip(*rows))
+      #if not valid_ls: raise ValueError
+      count += 1
+      valset = get_val_points(rows, value_set)
+      if all(rows[0][i] < rows[0][i+1] and rows[i][0] < rows[i+1][0] for i in range(len(rows)-1)): reducedls += 1
+      #latin squares have only row/column permutations to consider
+      #while sudoku has band/stack permutations and row/column permutations within a band/stack
+      #mirrorrows = mirror_sudoku(rows, 0) #not necessary if doing row/column permutations
+      #rotations are transpositions + reflections so also not necessary
+      #transposerows = transpose_sudoku(rows) #only this is necessary
+      #for r in (rotate_sudoku(rows, 0), rotate_sudoku(rows, 1), rotate_sudoku(rows, 2), mirrorrows, rotate_sudoku(mirrorrows, 0), rotate_sudoku(mirrorrows, 1), rotate_sudoku(mirrorrows, 2), transposerows, rotate_sudoku(transposerows, 0), rotate_sudoku(transposerows, 1), rotate_sudoku(transposerows, 2)):
+        #if get_val_points(r, value_set) in uniquevals: return 1
+      if not valset in uqls and is_isotopic_latin_square(rows, uqls, value_set):
+        uniquels.add(valset)
+        if is_mainclass_latin_square(rows, mainclassls, value_set):
+          mainclassls.add(valset)
+        print(count, housedict, reducedls, len(uniquels), len(mainclassls), len(uniquesudoku), len(uqls))
+      if count % 1000000 == 0: print(count, housedict, reducedls, len(uniquels), len(mainclassls), len(uniquesudoku))
+      if not houses is None:
+        badhouse = sum(1 for i in range(l) if len(set(rows[x][y] for x, y in houses[i])) != l)
+        housedict[badhouse] += 1
+        if housedict[badhouse] == 1:
+          print(badhouse)
+          if l == isqrt(l) * isqrt(l): print_sudoku(rows)
+          else: print(rows)
+        if badhouse == 0:
+          if not valset in uqsudoku and is_essentially_unique_sudoku(rows, uqsudoku, value_set, bandstack):
+            uniquesudoku.add(valset)
+            if l == isqrt(l) * isqrt(l): print_sudoku(rows)
+            else: print(rows)
+      return 1 #[rows] #if valid_ls else []
+    squarecount = 0 #squares = []
+    for row in uprod(*sets):
+      squarecount += gen_latin_squares(rows + [row], tuple(sets[i] - frozenset((row[i],)) for i in range(l)))
+      #squares.extend(gen_latin_squares(rows + [row], tuple(sets[i] - frozenset((row[i],)) for i in range(l))))
+    return squarecount #squares
+  value_set = frozenset(range(1, l+1))
+  res = gen_latin_squares([], tuple(value_set for _ in range(l)))
+  print(res, housedict, reducedls, len(uniquels), len(mainclassls), len(uniquesudoku))
+def omino_valid_ls(houses, l):
+  def has_latin_square(rows, sets):
+    if len(rows) == l:
+      badhouse = sum(1 for i in range(l) if len(set(rows[x][y] for x, y in houses[i])) != l)
+      return badhouse == 0
+    for row in uprod(*sets):
+      if has_latin_square(rows + [row], tuple(sets[i] - frozenset((row[i],)) for i in range(l))): return True
+    return False
+  value_set = frozenset(range(1, l+1))
+  return has_latin_square([], tuple(value_set for _ in range(l)))
+def omino_placements(l): #https://oeis.org/A172477, https://oeis.org/A328020, https://oeis.org/A172478
+  #place ominos in opposite corners and then brute force search
+  unique_place = set()
+  has_valid_ls = set()
+  value_set = set(range(1, l+1))
+  def brute_omino_rcrse(ominos, board):
+    if len(ominos) == l:
+      o = frozenset(ominos)
+      if not o in unique_place:
+        mirrorboard = mirror_sudoku(board, 0)
+        transposeboard = transpose_sudoku(board)
+        if not any(get_val_points(x, value_set) in unique_place for x in (rotate_sudoku(board, 0), rotate_sudoku(board, 1), rotate_sudoku(board, 2), mirrorboard, rotate_sudoku(mirrorboard, 0), rotate_sudoku(mirrorboard, 1), rotate_sudoku(mirrorboard, 2), transposeboard, rotate_sudoku(transposeboard, 0), rotate_sudoku(transposeboard, 1), rotate_sudoku(transposeboard, 2))):
+          unique_place.add(o)
+          solvable = True
+          for omino in ominos:
+            ominodict = {(i, j):k+1 for k, (i, j) in enumerate(omino)}
+            sudoku = [[None if not (i, j) in ominodict else ominodict[(i, j)] for j in range(l)] for i in range(l)]
+            mutex_rules = (*standard_sudoku_singoverlap_regions(l), tuple(frozenset(x) for x in jigsaw_to_coords(board).values()))
+            rem, solve_path, _ = solve_sudoku(sudoku, mutex_rules, (), (), value_set, None)
+            if rem is None:
+              solvable = False; print(logical_solve_string(solve_path, mutex_rules)); print_border(sudoku, exc_from_border(board, ())); break
+          #if solvable != omino_valid_ls(ominos, l): raise ValueError(solvable, omino_valid_ls(ominos, l))
+          #if omino_valid_ls(ominos, l):
+          if solvable:
+            has_valid_ls.add(o)
+          else: print_border([[None] * l for _ in range(l)], exc_from_border(board, ()))
+      return 1
+    count, u = 0, frozenset.union(*ominos)
+    for omino in region_ominos(next((x, y) for x in range(l) for y in range(l) if board[x][y] is None), board, ()):
+      #if not check_path_combo(omino, u): continue
+      nextboard = add_region([x.copy() for x in board], omino, len(ominos)+1)
+      count += brute_omino_rcrse(ominos + [omino], nextboard)
+    return count
+  def check_path_combo(path, combo):
+    u = path.union(combo)
+    if len(u) != len(path) + len(combo): return False
+    not_hole = set()
+    for (x, y) in get_path_boundary(u, l):
+      if (x, y) in not_hole: continue
+      cur_hole = get_hole_path(u, (), l, set(), x, y)
+      if len(cur_hole) % l != 0: return False
+      not_hole = not_hole.union(cur_hole)
+    return True
+  if l <= 1: return l
+  board = [[None] * l for _ in range(l)]
+  count, ominos = 0, []
+  for mainomino in region_ominos((0, 0), board, ()):
+    mainboard = add_region([x.copy() for x in board], mainomino, 1)
+    for lastomino in region_ominos((l-1, l-1), mainboard, ()):
+      if not check_path_combo(lastomino, mainomino): continue
+      lastboard = add_region([x.copy() for x in mainboard], lastomino, 2)
+      count += brute_omino_rcrse([mainomino, lastomino], lastboard)
+  return count, len(unique_place), len(has_valid_ls)
 def orthagonal_pts(i, j): return ((i, j-1), (i-1, j), (i+1, j), (i, j+1))
 def filter_bounds_points(l, points):
   return filter(lambda x: x[0] >= 0 and x[0] <= l-1 and x[1] >= 0 and x[1] <= l-1, points)
@@ -2166,15 +2368,17 @@ def egg_ominos(egg, ominos, board, remcagesizes):
             if q + omadd + 1 <= max(remcagesizes): paths[q + omadd + 1].add(frozenset((*z, (i, j), *(p for o in nextominos for p in o))))
   return {x:y for x,y in paths.items() if x in remcagesizes and len(y) != 0}
 def exclude_snake_egg_rule_gen(snake, cagesizes):
+  snakerem, onlysnake, ominodict, ominos, remcagesizes = None, None, None, None, None
   def exclude_snake_egg_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+    nonlocal snakerem, onlysnake, ominodict, ominos, remcagesizes #not the best way to keep state, should refactor for arbitrary exclusion state
     possible, l = [], len(rem)
     mins, _ = get_min_max_sums(value_set)
-    snakerem = [[(i, j) in snake for j in range(len(x))] for i, x in enumerate(rem)] #True for snake, False for undetermined, None for not snake
+    if snakerem is None: snakerem = [[(i, j) in snake for j in range(len(x))] for i, x in enumerate(rem)] #True for snake, False for undetermined, None for not snake
     snakelen = l * l - sum(cagesizes)
-    onlysnake = value_set.difference(cagesizes)
-    ominodict = {}
-    ominos = []
-    remcagesizes = list(cagesizes)
+    if onlysnake is None: onlysnake = value_set.difference(cagesizes)
+    if ominodict is None: ominodict = {}
+    if ominos is None: ominos = []
+    if remcagesizes is None: remcagesizes = list(cagesizes)
     def add_to_ominos(x, y):
       neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
       relnbs = [(i, j) for i, j in neighbors if (i, j) in ominodict]
@@ -2187,6 +2391,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
       for y in range(l):
         if rem[x][y].issubset(onlysnake):
           if snakerem[x][y] == False: snakerem[x][y] = True
+    """
     truesnake = (
       (0, 1, 1, 1, 1, 0, 1, 1, 1),
       (1, 1, 0, 0, 1, 0, 1, 0, 1),
@@ -2197,8 +2402,6 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
       (1, 1, 1, 0, 1, 0, 0, 1, 0),
       (0, 0, 1, 0, 1, 0, 0, 1, 0),
       (0, 0, 0, 0, 1, 1, 1, 1, 0))
-    #snakerem[2][5] = None; add_to_ominos(2, 5)
-    """
     truesnake = (
       (1, 1, 1, 1, 1, 1, 0, 0, 0),
       (1, 0, 0, 0, 0, 1, 1, 1, 1),
@@ -2291,7 +2494,26 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
         def res_none(r): return 0 if r is None else r[0]
         def check_border_egg(egg):
           border = get_path_boundary(egg, l)
+          def get_hole(x, y, alreadypts):
+            if (x, y) in alreadypts: return frozenset()
+            alreadypts.add((x, y))
+            if snakerem[x][y] == False and not (x, y) in border and not (x, y) in egg:
+              pts = frozenset.union(*(orthagonal_points(x, y, l)))
+              return frozenset.union(*(get_hole(i, j, alreadypts) for i, j in pts), frozenset(((x, y),)))
+            else: return frozenset()
+          def traverse_snake(x, y, alreadypts):
+            if (x, y) in alreadypts: return frozenset(), frozenset()
+            alreadypts.add((x, y))
+            if snakerem[x][y] or (x, y) in border:
+              pts = frozenset.union(*(orthagonal_points(x, y, l)))
+              trav = tuple(traverse_snake(i, j, alreadypts) for i, j in pts)
+              others, headtail = frozenset.union(*(o for o, _ in trav)), frozenset.union(*(ht for _, ht in trav))
+              return frozenset.union(others, frozenset(((x, y),))), frozenset.union(headtail, frozenset(((x, y),))) if len(others) == 0 else headtail
+            else: return frozenset(), frozenset()
           #check if snake touches itself orthagonally or creates a new head/tail
+          #must also check if any regions are created with an odd number of snake ends going in or out - as this is an exclusion criteria that eliminates need for bifurcation
+          #also can check for locked candidates on values like 9 that guarantee the snake must go through some square in an area
+          checkedhole = frozenset()
           for x, y in border:
             neighbors = frozenset.union(*(orthagonal_points(x, y, l)))
             inborder = neighbors.intersection(border) | {n for n in neighbors if snakerem[n[0]][n[1]]}
@@ -2328,21 +2550,46 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
                 if snakerem[i][j] and sum(1 if pt in border or snakerem[pt[0]][pt[1]] else 0 for pt in frozenset.union(*(orthagonal_points(i, j, l)))) == 1 and len(frozenset.union(*(orthagonal_points(i, j, l)))) == 3:
                   return False
             if len(inegg) == 4 or (len(inegg) == 3 or len(inegg) == 2 and len(neighbors) == 3) and not (x, y) in snake: return False #bad head/tail induced
+            for i, j in neighbors:
+              if (i, j) in checkedhole: continue
+              hole = get_hole(i, j, set())
+              if len(hole) == 0: continue
+              checkedhole = checkedhole | hole
+              allenters = {pt for pt in get_path_boundary(hole, l) if snakerem[pt[0]][pt[1]] or pt in border}
+              allset, allcombs = [], []
+              for pt in allenters:
+                if len(allset) != 0 and pt in frozenset.union(*allset): continue
+                inset, headtail = traverse_snake(pt[0], pt[1], set())
+                if len(inset) != 1 and len(headtail) == 1: headtail = headtail | frozenset(((pt[0], pt[1]),))
+                #if allenters.issubset(inset): continue
+                #if headtail.issubset(allenters) or len(headtail.intersection(allenters)) == 0: continue
+                totholes = sum(1 for pt in headtail.intersection(allenters) if any(not p in hole and not p in egg and not p in inset and snakerem[p[0]][p[1]] == False for p in frozenset.union(*(orthagonal_points(pt[0], pt[1], l)))))
+                #totholes = [{p for p in frozenset.union(*(orthagonal_points(pt[0], pt[1], l))) if not p in hole and not p in egg and not p in inset and snakerem[p[0]][p[1]] == False} for pt in headtail.intersection(allenters)]
+                totinhole = [{p for p in frozenset.union(*(orthagonal_points(pt[0], pt[1], l))) if p in hole} for pt in headtail.intersection(allenters)]
+                #if egg == frozenset({(1, 2), (1, 3)}): print(inset, headtail, not headtail.issubset(allenters) and len(headtail.intersection(allenters)) != 0 and totholes == 0, len(headtail.intersection(snake)) != 0 and headtail.difference(snake).issubset(allenters) and totholes == 0, len(headtail.intersection(snake)) == 0 and totholes == 1)
+                #if not headtail.issubset(allenters) and len(headtail.intersection(allenters)) != 0 or len(headtail.intersection(snake)) != 0 and headtail.difference(snake).issubset(allenters) or len(headtail.intersection(snake)) == 0 and totholes == 1:
+                allset.append(inset.intersection(allenters))
+                if len(headtail.intersection(snake)) != 0: allcombs.append(tuple(range(1 - (1 if totholes != 0 else 0) if len(headtail.intersection(allenters)) != 0 else 0, (1 if len(headtail.intersection(allenters)) != 0 else 0)+1)))
+                elif len(headtail) == 1: allcombs.append(tuple(range(len(headtail.intersection(allenters)) + min(1, len(totinhole[0]) - 1) - (totholes if totholes + len(totinhole[0]) != 2 else 0), len(headtail.intersection(allenters)) + min(1, len(totinhole[0]) - 1) + 1)))
+                else: allcombs.append(tuple(range(len(headtail.intersection(allenters)) - totholes, len(headtail.intersection(allenters)) + 1)))
+              if not (i, j) in border and not (i, j) in egg and snakerem[i][j] == False and all(sum(comb) & 1 == 1 for comb in itertools.product(*allcombs)): #len(allset) & 1 == 1:
+                return False
+          for regions in mutex_rules:
+            for region in regions:
+              for y in onlysnake:
+                candidates = {pt for pt in region if y in rem[pt[0]][pt[1]]}
+                if candidates.issubset(egg): return False
           return True
         if len(openborder) != 0 and not progress:
           potominos = {x:{z for z in y if res_none(min_sum_efficient([rem[p][q] for p, q in z])) == mins[x-1] and check_border_egg(z)} for x,y in egg_ominos(omino, ominos, snakerem, remcagesizes).items()}
           nakeds = [pt for o in ominos for pt in o if len(rem[pt[0]][pt[1]]) == 1]
           nakeddict = {y:{pt for pt in nakeds if next(iter(rem[pt[0]][pt[1]])) == y} for y in range(1, len(cagesizes)+1)}
           potominos = {x:{z for z in y if len(nakeddict[x]) != len(cagesizes) - x + 1 or len(nakeddict[x].intersection(z)) != 0} for x, y in potominos.items()}
-          #print(potominos, ominos, omino)
-          #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
-          if (4, 4) in omino: print(potominos)
           for x, y in frozenset.intersection(*(u for v in potominos.values() for u in v)).difference(omino):
             if snakerem[x][y] == False: snakerem[x][y] = None; add_to_ominos(x, y); progress = True
           if progress: break
           for x, y in set.intersection(*(get_path_boundary(u, l) for v in potominos.values() for u in v)):
             if snakerem[x][y] == False: snakerem[x][y] = True; progress = True
-          #if len(potominos) == 1: pass        
       nakeds = [pt for o in ominos for pt in o if len(rem[pt[0]][pt[1]]) == 1]
       for y in range(1, len(cagesizes)+1):
         points = [pt for pt in nakeds if next(iter(rem[pt[0]][pt[1]])) == y]
@@ -2351,11 +2598,11 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
             for j in range(l):
               if len(rem[i][j]) == 1 and next(iter(rem[i][j])) == y:
                 if snakerem[i][j] == False: snakerem[i][j] = True; progress = True
-      if not all([all([True if y is False else (1 if y else 0) == truesnake[i][j] for j, y in enumerate(x)]) for i, x in enumerate(snakerem)]):
-        print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
-        raise ValueError
+      #if not all([all([True if y is False else (1 if y else 0) == truesnake[i][j] for j, y in enumerate(x)]) for i, x in enumerate(snakerem)]):
+      #  print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+      #  raise ValueError
       if not progress: break
-    print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
+    #print_sudoku([[2 if y is None else int(y) for y in x] for x in snakerem])
     #print(tuple(tuple(0 if y is None else int(y) for y in x) for x in snakerem))
     #print(ominos, remcagesizes)
     eggs = []
@@ -2381,7 +2628,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
 def check_puzzle(y):
   rem, solve_path, border = solve_sudoku(y[0], y[1], y[2], y[3], y[4], y[5])
   rem, valid = check_sudoku(rem, y[1], y[4])
-  #print(logical_solve_string(solve_path, y[1]))
+  print(logical_solve_string(solve_path, y[1]))
   if not rem is None:
     y[6][0](rem) if y[5] is None else y[6][0](rem, border)
     if not valid:
@@ -2545,16 +2792,17 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
   l = len(value_set)
   tot = sum(value_set)
   cf = combination_freedom_gen(cell_visibility_rules, value_set, l)
-  genkiller, combinedkiller = [(x, frozenset(y)) for x, y in killer], []
+  genkiller, subkiller, combinedkiller = [(x, frozenset(y)) for x, y in killer], [], []
   gencf = {x: cf(x)[0] for x in genkiller}
   already = set()
   while True:
     while True:
-      nextkiller = []
+      nextkiller, nextsubkiller = [], []
       print(tuple(len(x) for x in get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, maximal=True)))
-      for p in get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, 4) + get_mutex_cages([y for _, y in genkiller], cell_visibility_rules, l, maximal=True)[-1:]:
+      gencomb = genkiller + subkiller
+      for p in get_mutex_cages([y for _, y in gencomb], cell_visibility_rules, l, 4) + get_mutex_cages([y for _, y in gencomb], cell_visibility_rules, l, maximal=True)[-1:]:
         for jp in p:
-          j = [genkiller[j] for j in jp]
+          j = [gencomb[j] for j in jp]
           combined = frozenset.union(*(q[1] for q in j))
           if combined in already: continue
           already.add(combined)
@@ -2577,8 +2825,11 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
                   if newcf <= cfgroup and not newregion in genkiller and not newregion in nextkiller:
                     print(newregion, newcf, cfgroup)
                     nextkiller.append(newregion); gencf[newregion] = newcf
-      if len(nextkiller) == 0: break
+                  elif newcf <= (cfgroup << 2) and not newregion in genkiller and not newregion in nextkiller:
+                    nextsubkiller.append(newregion); gencf[newregion] = newcf
+      if len(nextkiller) == 0 and len(nextsubkiller) == 0: break
       genkiller.extend(nextkiller)
+      subkiller.extend(nextsubkiller)
       genkiller, nextkiller = break_contained_cages(genkiller)
       for g in nextkiller: genkiller.append(g); gencf[g] = cf(g)[0]
     nextkiller = []
@@ -2607,6 +2858,19 @@ def best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set):
     for g in nextkiller: genkiller.append(g); gencf[g] = cf(g)[0]
     print(genkiller)
   return [(x, tuple(y)) for x, y in genkiller + combinedkiller]
+def surplus_cages_sudoku(puzzle, killer):
+  l = len(puzzle)
+  value_set = frozenset(range(1, l+1))
+  tot = sum(value_set)
+  mutex_rules = standard_sudoku_mutex_regions(l)
+  cages = [(x, y) for x, y in killer if len(y) <= l] #only non-balanced cages
+  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules)
+  killergen = best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set)
+  killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
+  #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
+  #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
+  return (puzzle, mutex_rules, (), (exclude_killer_rule_gen(killergen),), value_set, None,
+          (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
 def knight_killer_balanced_cages_sudoku(puzzle, killer):
   l = len(puzzle)
   value_set = frozenset(range(1, l+1))
@@ -2713,7 +2977,7 @@ def get_diagonal(side, index, l):
     return tuple((i, i + index) for i in range(l - index))
   elif side == 2: #top side diagonals heading down and left
     return tuple((i, index - i) for i in range(index + 1))
-  elif side == 3: #bottom diagonls heading up and right, excluding first shared diagonal with top
+  elif side == 3: #bottom diagonals heading up and right, excluding first shared diagonal with top
     return tuple((l - i - 1, index + i + 1) for i in range(l - index - 1))
 def cage_breakdown(cell_visibility_rules, value_set, l, k):
   groups = get_mutex_cells(k[1], cell_visibility_rules, l)
@@ -2742,9 +3006,9 @@ def combination_freedom_gen(cell_visibility_rules, value_set, l):
     return min(k[0] - mn, mx - k[0])
     """
   return combination_freedom
-def little_killer_sudoku(puzzle, little_killer_diagonals):
+def little_killer_sudoku(puzzle, diagonals):
   l = len(puzzle)
-  killer = [(y, get_diagonal(i, j, l)) for i, x in enumerate(little_killer_diagonals) for j, y in enumerate(x) if not y is None]
+  killer = [(y, get_diagonal(i, j, l)) for i, x in enumerate(diagonals) for j, y in enumerate(x) if not y is None]
   mutex_rules = standard_sudoku_mutex_regions(l)
   value_set = frozenset(range(1, l+1))
   """
@@ -2764,6 +3028,17 @@ def little_killer_sudoku(puzzle, little_killer_diagonals):
   killergen = best_killer_cages(killer, mutex_rules, cell_visibility_rules, value_set)
   killergen = tuple(sorted(killergen, key=combination_freedom_gen(cell_visibility_rules, value_set, l)))  
   #killergen = list(sorted((*killer, *addkiller), key=combination_freedom_gen(cell_visibility_rules, value_set, l)))
+  return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen),), value_set, None, (print_sudoku, print_candidate_format))
+def big_little_killer_sudoku(puzzle, cages, diagonals):
+  l = len(puzzle)
+  killer = [(y, get_diagonal(i, j, l)) for i, x in enumerate(diagonals) for j, y in enumerate(x) if not y is None]
+  print(killer)
+  mutex_rules = standard_sudoku_mutex_regions(l)
+  value_set = frozenset(range(1, l+1))
+  cvr = (killer_puzzle_gen(cages),)
+  cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cvr
+  killergen = best_killer_cages((*cages, *killer), mutex_rules, cell_visibility_rules, value_set)
+  print(killergen)
   return (puzzle, mutex_rules, cvr, (exclude_killer_rule_gen(killergen),), value_set, None, (print_sudoku, print_candidate_format))
 def sandwich_sudoku(puzzle, sandwich_row_cols):
   l = len(puzzle)
@@ -2985,7 +3260,7 @@ def get_ctc_puzzles():
     ((3, 4), (4, 4)), ((4, 3), (4, 4)), ((4, 4), (5, 4)),
     ((0, 2), (0, 3)), ((5, 2), (5, 3))))
     
-  nightmare_sudoku = ( #https://www.youtube.com/watch?v=Tv-48b-KuxI, https://www.patreon.com/posts/37223311
+  nightmare_sudoku = ( #https://www.youtube.com/watch?v=Tv-48b-KuxI, https://www.patreon.com/posts/37223311, https://www.youtube.com/watch?v=uhYYUVYsS_c
     (1, 2, 3, 4, None, None),
     (None, None, None, None, None, None),
     (None, None, None, None, None, None),
@@ -3104,9 +3379,9 @@ def get_ctc_puzzles():
   
   fiendish_little_killer_diagonals = (
     (None, None, None, None, 26, 25, 21, 13, None), #left side diagonals heading down and right
-    (None, None, 20, None, 22, None, 20, None), #right side diagonals heading up and left, excluding last shared diagonal with left
+    (None, None, 20, None, 22, None, 20, None, None), #right side diagonals heading up and left, excluding last shared diagonal with left
     (None, 13, 15, 31, None, None, None, None, None), #top side diagonals heading down and left
-    (None, None, None, None, None, None, 15, None) #bottom diagonls heading up and right, excluding first shared diagonal with top
+    (None, None, None, None, None, None, 15, None) #bottom diagonals heading up and right, excluding first shared diagonal with top
     )
     
   miracle_man_thermo_sudoku = ((None,) * 9,) * 9 #https://www.youtube.com/watch?v=bYXstZ8obAw
@@ -3579,7 +3854,33 @@ def get_ctc_puzzles():
   nonograms_cross_the_streams_murat = (
     (('*', 1, '*', 2, '*'), ('*', 3, '*'), ('*', 4), ('*', 5, '*'), ('*', 2, 1, '*'), ('*', 2, 3, '*'), ('*', 5, '*'), ('*', 4), ('*', 2, '*'), ('*', 1, '*', 3, '*')),
     ((2, '*'), (5, '*'), ('*', 4, 3, '*'), (2, '*'), ('*', 2, '*', 2, '*'), ('*', 1, '*', 1, '*'), (2, '*'), ('*', 3, 1, '*'), (3, '*'), (4, '*')))
-  
+    
+  surplus_cages_puzzle = ((None,) * 9,) * 9 #zarankiewicz puzzle from discord
+  surplus_cages_puzzle_cages = (
+    (18, ((0, 4), (0, 5), (0, 6), (1, 4))),
+    (36, ((0, 7), (0, 8), (1, 5), (1, 6), (1, 7), (1, 8))),
+    (30, ((2, 5), (2, 6), (2, 7), (3, 5), (3, 6), (3, 7))),
+    (20, ((2, 8), (3, 8), (4, 7), (4, 8))),
+    (9, ((4, 0), (4, 1), (5, 0), (6, 0))),
+    (31, ((5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (6, 3))),
+    (24, ((5, 6), (6, 5), (6, 6), (6, 7), (7, 6))),
+    (28, ((7, 0), (7, 1), (7, 2), (7, 3), (8, 0), (8, 1))),
+    (17, ((7, 4), (8, 2), (8, 3), (8, 4))))
+    
+  big_little_killer_puzzle = ((None,) * 9,) * 9
+  big_little_killer_puzzle_cages = (
+    (16, ((0, 3), (0, 4), (1, 3), (1, 4))),
+    (13, ((1, 6), (1, 7), (2, 6), (2, 7))),
+    (30, ((3, 0), (3, 1), (4, 0), (4, 1))),
+    (28, ((4, 7), (4, 8), (5, 7), (5, 8))),
+    (20, ((7, 0), (7, 1), (8, 0), (8, 1))),
+    (24, ((7, 4), (7, 5), (8, 4), (8, 5))))
+  big_little_killer_puzzle_diagonals = (
+    (None, None, None, 30, None, None, None, None, None), #left side diagonals heading down and right
+    (None, None, None, 22, None, None, None, 11, None), #right side diagonals heading up and left, excluding last shared diagonal with left
+    (None, None, None, None, 23, None, None, None, None), #top side diagonals heading down and left
+    (None, None, None, 31, None, None, 9, None)) #bottom diagonals heading up and right, excluding first shared diagonal with top
+      
   #print_border(((None,) * 6,) * 6, prize_sudoku_subsquare_exc)
   #print_border(get_border_count([[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc), prize_sudoku_subsquare_exc)
   #print_border(add_region([[None] * 6 for _ in range(6)], max_region(region_ominos((3, 3), [[None] * 6 for _ in range(6)], prize_sudoku_subsquare_exc))[0], 1), prize_sudoku_subsquare_exc)
@@ -3589,10 +3890,12 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
+    #big_little_killer_sudoku(big_little_killer_puzzle, big_little_killer_puzzle_cages, big_little_killer_puzzle_diagonals),
+    #standard_sudoku(hardest_sudoku),
+    #king_sudoku(king_knight_queen_sudoku),
     rose_violet_sudoku(rose_one_violet_two_sudoku, rose_one_violet_two_sudoku_roses, rose_one_violet_two_sudoku_violets),
-    snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
-    snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     #knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
+    #surplus_cages_sudoku(surplus_cages_puzzle, surplus_cages_puzzle_cages),
     thermo_sandwich_sudoku(thermo_sandwich_puzzle, thermo_sandwich_puzzle_sandwiches, thermo_sandwich_puzzle_thermos),
     )
   return (
@@ -3648,7 +3951,9 @@ def get_ctc_puzzles():
     knight_killer_balanced_cages_sudoku(antiknight_killer_sudoku, antiknight_killer_sudoku_cages),
     knight_killer_balanced_cages_sudoku(best_ever_solve_sudoku, best_ever_solve_sudoku_cages),
     knight_killer_cages_even_mirror_magic_square_sudoku(more_magic_sudoku, more_magic_sudoku_killer_cages, more_magic_sudoku_magic_squares, more_magic_sudoku_evens, more_magic_sudoku_mirror_sub_squares),
-    royal_clone_sudoku(royal_clone_sudoku_puzzle, royal_clone_sudoku_cages, royal_clone_sudoku_mirror_sub_squares)
+    royal_clone_sudoku(royal_clone_sudoku_puzzle, royal_clone_sudoku_cages, royal_clone_sudoku_mirror_sub_squares),
+    snake_egg_jigsaw_sudoku(grandmaster_tribute_sudoku, grandmaster_tribute_sudoku_jigsaw, grandmaster_tribute_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
+    snake_egg_sudoku(puzzle_joy_sudoku, puzzle_joy_sudoku_snake, (1, 2, 3, 4, 5, 6, 7, 8)),
     )
 
 def get_impossible_puzzles():
