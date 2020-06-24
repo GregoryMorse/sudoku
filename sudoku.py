@@ -155,42 +155,124 @@ def latin_squares(l): #4x4 sudoku has only 0 and 4 bad house combinations, 9x9 t
   res = gen_latin_squares([], tuple(value_set for _ in range(l)))
   print(res, housedict, reducedls, len(uniquels), len(mainclassls), len(uniquesudoku))
 def omino_valid_ls(houses, l):
+  housemap = {i:[{pt for pt in h if pt[0] < i} for h in houses] for i in range(2, l)}
   def has_latin_square(rows, sets):
     if len(rows) == l:
       badhouse = sum(1 for i in range(l) if len(set(rows[x][y] for x, y in houses[i])) != l)
       return badhouse == 0
-    for row in uprod(*sets):
+    elif len(rows) >= 2 and sum(1 for i in range(l) if len(set(rows[x][y] for x, y in housemap[len(rows)][i])) != len(housemap[len(rows)][i])) != 0: return False
+    for row in (tuple(value_set),) if len(rows) == 0 else uprod(*sets):
       if has_latin_square(rows + [row], tuple(sets[i] - frozenset((row[i],)) for i in range(l))): return True
     return False
   value_set = frozenset(range(1, l+1))
   return has_latin_square([], tuple(value_set for _ in range(l)))
+def origin_omino(o):
+  mnr = min(o, key=lambda x: x[0])[0]
+  mnc = min(o, key=lambda x: x[1])[1]
+  return frozenset((x - mnr, y - mnc) for (x, y) in o)
+def transpose_omino(o):
+  return origin_omino(frozenset((y, x) for (x, y) in o))
+def match_omino(ominos, omino): #convert arbitrary omino to its representative free omino
+  o = origin_omino(omino)
+  if o in ominos: return o
+  r = rotate_omino(o, 0)
+  if r in ominos: return r
+  r = rotate_omino(o, 1)
+  if r in ominos: return r
+  r = rotate_omino(o, 2)
+  if r in ominos: return r
+  m = mirror_omino(o, 0) #can be either axis 0/1 here...
+  if m in ominos: return m
+  r = rotate_omino(m, 0)
+  if r in ominos: return r
+  r = rotate_omino(m, 1)
+  if r in ominos: return r
+  r = rotate_omino(m, 2)
+  if r in ominos: return r
+def omino_to_svg(omino, curdir):
+  #pip install https://download.lfd.uci.edu/pythonlibs/w3jqiv8s/pycairo-1.19.1-cp38-cp38-win_amd64.whl
+  mxr = max(omino, key=lambda x: x[0])[0] + 1
+  mxc = max(omino, key=lambda x: x[1])[1] + 1
+  scale = 21
+  from cairo import SVGSurface, Context, Matrix
+  fname = os.path.join(curdir, str(hash(omino)) + '.svg')
+  s = SVGSurface(fname, mxc * scale+1+1, mxr * scale+1+1)
+  c = Context(s)
+  m = Matrix(yy=-1, y0=mxr * scale+1+1)
+  c.transform(m)
+  for pt in omino:
+    c.move_to(1+pt[1] * scale, 1+pt[0] * scale)
+    c.line_to(1+pt[1] * scale, (pt[0] + 1) * scale)
+    c.line_to((pt[1] + 1) * scale, (pt[0] + 1) * scale)
+    c.line_to((pt[1] + 1) * scale, 1+pt[0] * scale)
+    c.close_path()
+    c.save()
+    c.set_line_width(1.0)
+    c.stroke_preserve()
+    c.set_source_rgb(0.7, 0.7, 0.7)
+    c.fill()
+    c.restore()
+  s.finish()
+  return fname
+  
+#essentially unique: 1,1,2,21,507,54588
+#omino_placements(1): (1, 1, 1, 1)
+#omino_placements(2): (2, 2, 1, 1)
+#omino_placements(3): (10, 10, 2, 2)
+#omino_placements(4): (117, 109, 22, 21)
+#omino_placements(5): (4006, 3942, 515, 507)
+#omino_placements(6): (451206, 434050, 56734, 54588)
 def omino_placements(l): #https://oeis.org/A172477, https://oeis.org/A328020, https://oeis.org/A172478
   #place ominos in opposite corners and then brute force search
+  base_ominos = free_ominos_no_hole(l)
+  ominoall = {b:0 for b in base_ominos}
+  ominols = {b:0 for b in base_ominos}
   unique_place = set()
   has_valid_ls = set()
+  totls = 0
   value_set = set(range(1, l+1))
+  def get_mirror_rotates(board):
+    yield rotate_sudoku(board, 0)
+    yield rotate_sudoku(board, 1)
+    yield rotate_sudoku(board, 2)
+    mirrorboard = mirror_sudoku(board, 0)
+    yield mirrorboard
+    yield rotate_sudoku(mirrorboard, 0)
+    yield rotate_sudoku(mirrorboard, 1)
+    yield rotate_sudoku(mirrorboard, 2)
+    transposeboard = transpose_sudoku(board)
+    yield transposeboard
+    yield rotate_sudoku(transposeboard, 0)
+    yield rotate_sudoku(transposeboard, 1)
+    yield rotate_sudoku(transposeboard, 2)
   def brute_omino_rcrse(ominos, board):
+    nonlocal totls
     if len(ominos) == l:
       o = frozenset(ominos)
-      if not o in unique_place:
-        mirrorboard = mirror_sudoku(board, 0)
-        transposeboard = transpose_sudoku(board)
-        if not any(get_val_points(x, value_set) in unique_place for x in (rotate_sudoku(board, 0), rotate_sudoku(board, 1), rotate_sudoku(board, 2), mirrorboard, rotate_sudoku(mirrorboard, 0), rotate_sudoku(mirrorboard, 1), rotate_sudoku(mirrorboard, 2), transposeboard, rotate_sudoku(transposeboard, 0), rotate_sudoku(transposeboard, 1), rotate_sudoku(transposeboard, 2))):
-          unique_place.add(o)
-          solvable = True
-          for omino in ominos:
-            ominodict = {(i, j):k+1 for k, (i, j) in enumerate(omino)}
-            sudoku = [[None if not (i, j) in ominodict else ominodict[(i, j)] for j in range(l)] for i in range(l)]
-            mutex_rules = (*standard_sudoku_singoverlap_regions(l), tuple(frozenset(x) for x in jigsaw_to_coords(board).values()))
-            rem, solve_path, _ = solve_sudoku(sudoku, mutex_rules, (), (), value_set, None)
-            if rem is None:
-              solvable = False; print(logical_solve_string(solve_path, mutex_rules)); print_border(sudoku, exc_from_border(board, ())); break
-          #if solvable != omino_valid_ls(ominos, l): raise ValueError(solvable, omino_valid_ls(ominos, l))
-          #if omino_valid_ls(ominos, l):
-          if solvable:
-            has_valid_ls.add(o)
-          else: print_border([[None] * l for _ in range(l)], exc_from_border(board, ()))
-      return 1
+      match = list(itertools.takewhile(lambda x: not x in unique_place, map(lambda x: get_val_points(x, value_set), get_mirror_rotates(board))))
+      if not o in unique_place and len(match) == 3 + 4 + 4:
+        unique_place.add(o)
+        baseoms = [match_omino(base_ominos, om) for om in ominos]
+        for om in baseoms: ominoall[om] += 1
+        #solvable = True
+        #for omino in ominos:
+          #ominodict = {(i, j):k+1 for k, (i, j) in enumerate(omino)}
+          #sudoku = [[None if not (i, j) in ominodict else ominodict[(i, j)] for j in range(l)] for i in range(l)]
+          #mutex_rules = (*standard_sudoku_singoverlap_regions(l), tuple(frozenset(x) for x in jigsaw_to_coords(board).values()))
+          #rem, solve_path, _ = solve_sudoku(sudoku, mutex_rules, (), (), value_set, None)
+          #if rem is None:
+          #  solvable = False; print(logical_solve_string(solve_path, mutex_rules)); print_border(sudoku, exc_from_border(board, ())); break
+        #if solvable != omino_valid_ls(ominos, l): raise ValueError(solvable, omino_valid_ls(ominos, l))
+        #if solvable:
+        count = len(set((o, *match)))
+        if omino_valid_ls(ominos, l):
+          has_valid_ls.add(o); totls += count
+          for om in baseoms: ominols[om] += 1
+        else: print_border([[None] * l for _ in range(l)], exc_from_border(board, ())); print(len(unique_place), len(has_valid_ls))
+        return count
+      #elif o in has_valid_ls or any(get_val_points(x, value_set) in has_valid_ls for x in get_mirror_rotates(board)):
+      #  totls += 1
+      return 0
     count, u = 0, frozenset.union(*ominos)
     for omino in region_ominos(next((x, y) for x in range(l) for y in range(l) if board[x][y] is None), board, ()):
       #if not check_path_combo(omino, u): continue
@@ -207,16 +289,83 @@ def omino_placements(l): #https://oeis.org/A172477, https://oeis.org/A328020, ht
       if len(cur_hole) % l != 0: return False
       not_hole = not_hole.union(cur_hole)
     return True
-  if l <= 1: return l
+  if l <= 1: return l, l, l, l
   board = [[None] * l for _ in range(l)]
   count, ominos = 0, []
+  mainominosused = set()
   for mainomino in region_ominos((0, 0), board, ()):
+    if transpose_omino(mainomino) in mainominosused: continue
+    mainominosused.add(mainomino) #already on origin
     mainboard = add_region([x.copy() for x in board], mainomino, 1)
     for lastomino in region_ominos((l-1, l-1), mainboard, ()):
       if not check_path_combo(lastomino, mainomino): continue
       lastboard = add_region([x.copy() for x in mainboard], lastomino, 2)
       count += brute_omino_rcrse([mainomino, lastomino], lastboard)
-  return count, len(unique_place), len(has_valid_ls)
+      
+  lines = ["<!DOCTYPE html>"]
+  lines.append("<html>")
+  lines.append("<head><style>table, th, td { border: 1px solid black; }</style></head>")
+  lines.append("<body>")  
+  omino_names = ["monomino", "domino", "tromino", "tetromino", "pentomino", "hexomino", "heptomino", "octomino", "nonomino", "decomino", "undecomino", "dodecomino"]
+  tromino_names = {"I":frozenset({(0, 1), (0, 2), (0, 0)}), "L":frozenset({(0, 1), (1, 0), (1, 1)})} #https://en.wikipedia.org/wiki/Tromino
+  #https://tetris.wiki/Tetromino
+  tetromino_names = {"Straight":frozenset({(0, 1), (0, 2), (0, 3), (0, 0)}), "Square":frozenset({(0, 1), (1, 0), (1, 1), (0, 0)}),
+    "T":frozenset({(1, 0), (1, 1), (2, 0), (0, 0)}), "L":frozenset({(0, 1), (0, 2), (1, 2), (0, 0)}), "Skew":frozenset({(0, 1), (1, 0), (1, 1), (0, 2)})} #https://en.wikipedia.org/wiki/Tetromino
+  #for i in free_ominos(5): print(i); print(omino_string(i) + '\n')
+  pentomino_names = {"F":frozenset({(0, 1), (1, 2), (2, 1), (1, 1), (2, 0)}), "I":frozenset({(0, 1), (0, 4), (0, 0), (0, 3), (0, 2)}),
+    "L": frozenset({(0, 1), (0, 0), (0, 3), (0, 2), (1, 0)}), "N": frozenset({(2, 1), (0, 0), (3, 1), (2, 0), (1, 0)}),
+    "P": frozenset({(2, 1), (0, 0), (1, 1), (2, 0), (1, 0)}), "T": frozenset({(1, 2), (0, 0), (1, 1), (2, 0), (1, 0)}),
+    "U": frozenset({(0, 1), (2, 1), (0, 0), (2, 0), (1, 0)}), "V": frozenset({(0, 1), (0, 0), (2, 0), (0, 2), (1, 0)}),
+    "W": frozenset({(2, 1), (0, 0), (1, 1), (2, 2), (1, 0)}), "X": frozenset({(0, 1), (1, 2), (2, 1), (1, 1), (1, 0)}),
+    "Y": frozenset({(0, 1), (2, 1), (3, 1), (1, 1), (2, 0)}), "Z": frozenset({(0, 1), (2, 1), (1, 1), (2, 0), (0, 2)})} #https://en.wikipedia.org/wiki/Pentomino  
+  #http://www.gamepuzzles.com/sxnames.htm Short N and Short S are duplicates
+  hexomino_names = {"A": frozenset({(1, 2), (2, 1), (1, 1), (2, 0), (0, 2), (2, 2)}), "C": frozenset({(0, 1), (0, 0), (0, 3), (0, 2), (1, 0), (1, 3)}), 
+    "D": frozenset({(0, 1), (1, 2), (0, 0), (1, 1), (0, 3), (0, 2)}), "E": frozenset({(0, 1), (1, 2), (1, 1), (2, 0), (2, 2), (1, 0)}),
+    "High F": frozenset({(1, 2), (2, 1), (0, 0), (1, 1), (1, 0), (1, 3)}), "Low F": frozenset({(0, 1), (1, 2), (2, 1), (3, 1), (1, 1), (3, 0)}),
+    "G": frozenset({(2, 1), (0, 0), (3, 1), (1, 1), (3, 0), (1, 0)}), "H": frozenset({(1, 2), (0, 0), (1, 1), (2, 0), (2, 2), (1, 0)}),
+    "I": frozenset({(4, 0), (0, 0), (2, 0), (3, 0), (5, 0), (1, 0)}), "J": frozenset({(0, 1), (2, 1), (0, 0), (2, 0), (0, 2), (1, 0)}),
+    "K": frozenset({(0, 1), (1, 2), (2, 1), (1, 1), (2, 0), (1, 0)}), "L": frozenset({(0, 1), (2, 1), (0, 0), (3, 1), (1, 1), (4, 1)}),
+    "M": frozenset({(0, 1), (1, 2), (0, 0), (1, 1), (2, 3), (1, 3)}), "Long N": frozenset({(0, 1), (0, 0), (0, 3), (1, 4), (0, 2), (1, 3)}),
+    "O": frozenset({(0, 1), (1, 2), (0, 0), (1, 1), (0, 2), (1, 0)}), "P": frozenset({(0, 1), (0, 0), (1, 1), (0, 3), (0, 2), (1, 0)}),
+    "Q": frozenset({(0, 1), (2, 1), (1, 1), (2, 0), (0, 2), (1, 0)}), "R": frozenset({(0, 1), (1, 2), (2, 1), (0, 0), (1, 1), (0, 2)}),
+    "Long S": frozenset({(0, 1), (4, 0), (2, 1), (1, 1), (2, 0), (3, 0)}), "Short S": frozenset({(0, 1), (2, 1), (1, 1), (2, 0), (3, 0), (1, 0)}),
+    "Tall T": frozenset({(1, 2), (0, 0), (1, 1), (2, 0), (1, 0), (1, 3)}), "Short T": frozenset({(1, 2), (0, 0), (1, 1), (2, 0), (3, 0), (1, 0)}),
+    "U": frozenset({(0, 1), (1, 2), (1, 1), (0, 3), (1, 0), (1, 3)}), "V": frozenset({(0, 1), (1, 2), (0, 0), (0, 2), (2, 2), (3, 2)}),
+    "Wa": frozenset({(0, 1), (1, 1), (0, 3), (2, 0), (0, 2), (1, 0)}), "Wb": frozenset({(0, 1), (1, 2), (0, 0), (1, 1), (2, 3), (2, 2)}),
+    "Wc": frozenset({(0, 1), (2, 1), (1, 1), (2, 2), (1, 0), (3, 2)}), "X": frozenset({(0, 1), (2, 1), (3, 1), (1, 1), (2, 0), (2, 2)}),
+    "Italic X": frozenset({(0, 1), (1, 2), (2, 1), (3, 1), (1, 1), (2, 0)}), "High Y": frozenset({(4, 0), (0, 0), (3, 1), (2, 0), (3, 0), (1, 0)}),
+    "Low Y": frozenset({(0, 1), (1, 2), (0, 4), (0, 0), (0, 3), (0, 2)}), "Short Z": frozenset({(1, 2), (2, 1), (0, 3), (2, 0), (0, 2), (2, 2)}),
+    "Tall Z": frozenset({(1, 2), (0, 0), (1, 1), (2, 3), (1, 0), (1, 3)}), "High 4": frozenset({(1, 2), (1, 1), (2, 3), (0, 2), (2, 2), (1, 0)}),
+    "Low 4": frozenset({(0, 1), (1, 2), (1, 1), (2, 0), (3, 0), (1, 0)})}
+  lines.append("<p>Total {0} ({1}-size polyomino) placements into a {1}x{1} square: {2}</p>".format(omino_names[l-1], l, count))
+  lines.append("<p>Total {0} placements into a {1}x{1} valid sudoku: {2}</p>".format(omino_names[l-1], l, totls))
+  lines.append("<p>Total {0} essentially unique placements into a {1}x{1} square: {2}</p>".format(omino_names[l-1], l, len(unique_place)))
+  lines.append("<p>Total {0} essentially unique placements into a {1}x{1} valid sudoku: {2}</p>".format(omino_names[l-1], l, len(has_valid_ls)))
+  lines.append("<table>")
+  curdir = os.path.join('D:', 'Source', 'Repos', 'sudoku', 'images')
+  ominotbl, ominoallct, ominolsct = ["" for _ in range(1+(len(base_ominos) - 5 + 6) // 7)], ["" for _ in range(1+(len(base_ominos) - 5 + 6) // 7)], ["" for _ in range(1+(len(base_ominos) - 5 + 6) // 7)]
+  bominos = [x[0] for x in sorted(ominoall.items(), key=lambda o: o[1], reverse=True)]
+  for i, o in enumerate(bominos):
+    print(ominoall[o], ominols[o]); print(omino_string(o))
+    fname = omino_to_svg(o, curdir)
+    ominotbl[1+(i - 5) // 7 if i >= 5 else 0] += "<td><img src='" + fname + "'/></td>"
+    ominoallct[1+(i - 5) // 7 if i >= 5 else 0] += "<td><p>" + str(ominoall[o]) + "</p></td>"
+    ominolsct[1+(i - 5) // 7 if i >= 5 else 0] += "<td><p>" + str(ominols[o]) + "</p></td>"
+  lines.append("<tr><td><b>" + omino_names[l-1].capitalize() + "</b></td>" + ominotbl[0] + "</tr>")
+  lines.append("<tr><td><b>Total in essentially<br/> unique squares</b></td>" + ominoallct[0] + "</tr>")
+  lines.append("<tr><td><b>Total in essentially<br/> unique valid sudoku</b></td>" + ominolsct[0] + "</tr>")
+  lines.append("</table>")
+  for i in range(1, len(ominotbl)):
+    lines.append("<table>")
+    lines.append("<tr>" + ominotbl[i] + "</tr>")
+    lines.append("<tr>" + ominoallct[i] + "</tr>")
+    lines.append("<tr>" + ominolsct[i] + "</tr>")    
+    lines.append("</table>")
+  lines.append("</body>")
+  lines.append("</html>")
+  with open(os.path.join(curdir, "omino" + str(l) + ".html"), "w") as f:
+    f.writelines(lines)
+  return count, totls, len(unique_place), len(has_valid_ls), ominoall, ominols
 def orthagonal_pts(i, j): return ((i, j-1), (i-1, j), (i+1, j), (i, j+1))
 def filter_bounds_points(l, points):
   return filter(lambda x: x[0] >= 0 and x[0] <= l-1 and x[1] >= 0 and x[1] <= l-1, points)
@@ -953,16 +1102,12 @@ def rotate_omino(o, degree): #degree=0 for 90 degrees, 1 for 180 degrees, 2 for 
   if degree == 0: newpath = frozenset((y, mx-x) for (x, y) in o)
   elif degree == 1: newpath = frozenset((mx-x, mx-y) for (x, y) in o)
   elif degree == 2: newpath = frozenset((mx-y, x) for (x, y) in o)
-  mnr = min(newpath, key=lambda x: x[0])[0]
-  mnc = min(newpath, key=lambda x: x[1])[1]
-  return frozenset((x - mnr, y - mnc) for (x, y) in newpath)
+  return origin_omino(newpath)
 def mirror_omino(o, axis): #axis=0 for x-axis, 1 for y-axis
   mx = max(o, key=lambda x: x[axis])[axis]
   if axis == 0: newpath = frozenset((mx-x, y) for (x, y) in o)
   elif axis == 1: newpath = frozenset((x, mx-y) for (x, y) in o)
-  mnr = min(newpath, key=lambda x: x[0])[0]
-  mnc = min(newpath, key=lambda x: x[1])[1]
-  return frozenset((x - mnr, y - mnc) for (x, y) in newpath)
+  return origin_omino(newpath)
 def one_sided_ominos(l):
   candidates = gen_ominos(l)
   ominos = set()
