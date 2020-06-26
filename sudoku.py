@@ -109,7 +109,7 @@ def latin_squares(l): #4x4 sudoku has only 0 and 4 bad house combinations, 9x9 t
   housedict = {x:0 for x in range(l+1)}
   uniquesudoku, uqsudoku, uqls, uniquels, mainclassls = set(), set(), set(), set(), set()
   reducedls = 0
-  if l == 6: houses, bandstack = get_rects(l // 3, l // 2, l), (l // 3, l // 2, 3, 2)
+  if l == 6: houses, bandstack = get_rects(l // 2, l // 3, l), (l // 2, l // 3, 2, 3)
   elif l == isqrt(l) * isqrt(l): houses, bandstack = tuple(get_sub_square_points(i, l) for i in range(l)), (isqrt(l), isqrt(l), isqrt(l), isqrt(l))
   else: houses, bandstack = None, None
   def gen_latin_squares(rows, sets):
@@ -366,6 +366,56 @@ def omino_placements(l): #https://oeis.org/A172477, https://oeis.org/A328020, ht
   with open(os.path.join(curdir, "omino" + str(l) + ".html"), "w") as f:
     f.writelines(lines)
   return count, totls, len(unique_place), len(has_valid_ls), ominoall, ominols
+def min_kropki(l): #l=4, min/min unique=12, max=18  l=6, min=10, min unique=11, max=48
+  if l == 6: houses = get_rects(l // 2, l // 3, l)
+  else: houses = tuple(get_sub_square_points(i, l) for i in range(l))
+  housemap = {i:[{pt for pt in h if pt[0] < i} for h in houses] for i in range(1, l)}
+  pthouse = {pt:i for i in range(l) for pt in houses[i]}
+  count, mn, res = 0, l * (l - 1) * 2, None
+  kropkidict = dict()
+  edgemap = dict()
+  for i in range(l - 1):
+    for j in range(l):
+      edgemap[((i, j), (i+1, j))] = len(edgemap)
+      edgemap[((j, i), (j, i+1))] = len(edgemap)
+  value_set = frozenset(range(1, l+1))
+  permdict, revperm = dict(), []
+  for perm in itertools.permutations(value_set):
+    permdict[perm] = len(permdict)
+    revperm.append(perm)
+  def check_latin_square(rows, sets):
+    nonlocal count, mn, res
+    if len(rows) == l:
+      #badhouse = sum(1 for i in range(l) if len(set(rows[x][y] for x, y in houses[i])) != l)
+      #if badhouse != 0: return -1, None
+      count += 1
+      kropkiwhite, kropkiblack = set(), set()
+      for i in range(l - 1):
+        for j in range(l):
+          if rows[i][j] + 1 == rows[i+1][j] or rows[i][j] == rows[i+1][j] + 1: kropkiwhite.add(edgemap[((i, j), (i+1, j))])
+          elif rows[i][j] << 1 == rows[i+1][j] or rows[i][j] == rows[i+1][j] << 1: kropkiblack.add(edgemap[((i, j), (i+1, j))])
+          if rows[j][i] + 1 == rows[j][i+1] or rows[j][i] == rows[j][i+1] + 1: kropkiwhite.add(edgemap[((j, i), (j, i+1))])
+          elif rows[j][i] << 1 == rows[j][i+1] or rows[j][i] == rows[j][i+1] << 1: kropkiblack.add(edgemap[((j, i), (j, i+1))])
+      kropkinum = sum(1 << k for k in kropkiwhite) + sum(1 << (k + len(edgemap)) for k in kropkiblack)
+      if kropkinum in kropkidict: kropkidict[kropkinum] = (kropkidict[kropkinum][0] + 1, len(kropkiwhite | kropkiblack), None)
+      else: kropkidict[kropkinum] = (1, len(kropkiwhite | kropkiblack), [revperm[permdict[r]] for r in rows]) #rows
+      if count % 500000 == 0:
+        ka = tuple(filter(lambda k: kropkidict[k][0] == 1, kropkidict))
+        kd = kropkidict[min(ka, key=lambda k: kropkidict[k][1])] if len(ka) != 0 else None
+        print(count, mn, res, len(ka), len(kropkidict), (kd[1], kd[2]) if not kd is None else None)
+      return len(kropkiwhite | kropkiblack), rows
+    #elif len(rows) >= 2 and sum(1 for i in range(l) if len(set(rows[x][y] for x, y in housemap[len(rows)][i])) != len(housemap[len(rows)][i])) != 0: return -1, None
+    lr = len(rows)
+    housesets = [s - {rows[pt[0]][pt[1]] for pt in housemap[lr][pthouse[(lr, i)]]} for i, s in enumerate(sets)] if lr >= 1 else sets
+    for row in uprod(*housesets): #(tuple(value_set),) if len(rows) == 0 else uprod(*sets):
+      v, r = check_latin_square(rows + [row], tuple(sets[i] - frozenset((row[i],)) for i in range(l)))
+      if v != -1 and v < mn: mn, res = v, r
+    return mn, res
+  mn, res = check_latin_square([], tuple(value_set for _ in range(l)))
+  ka = tuple(filter(lambda k: kropkidict[k][0] == 1, kropkidict))
+  kd = kropkidict[min(ka, key=lambda k: kropkidict[k][1])] if len(ka) != 0 else None
+  return mn, res, len(ka), len(kropkidict), count, (kd[1], kd[2]) if not kd is None else None, kropkidict[max(kropkidict, key=lambda k: kropkidict[k][1])]
+
 def orthagonal_pts(i, j): return ((i, j-1), (i-1, j), (i+1, j), (i, j+1))
 def filter_bounds_points(l, points):
   return filter(lambda x: x[0] >= 0 and x[0] <= l-1 and x[1] >= 0 and x[1] <= l-1, points)
@@ -1066,6 +1116,65 @@ def inverse_transform(v, l):
   v, j = divmod(v, l)
   v, i = divmod(v, l)
   return i, j, k
+def get_north_south_east_west_visible(omino, p):
+  pts = {p}
+  i = 1
+  while (p[0] + i, p[1]) in omino: pts.add((p[0] + i, p[1])); i += 1
+  i = 1
+  while (p[0], p[1] + i) in omino: pts.add((p[0], p[1] + i)); i += 1
+  i = 1
+  while (p[0] - i, p[1]) in omino: pts.add((p[0] - i, p[1])); i += 1
+  i = 1
+  while (p[0], p[1] - i) in omino: pts.add((p[0], p[1] - i)); i += 1
+  return pts
+def sat_chaos(chaos):
+  def sat_chaos_inner(sudoku, mutex_rules, cell_visibility_rules, value_set):
+    l, cnf = len(sudoku), []
+    empty_board = [[None for _ in range(l)] for _ in range(l)]
+    tot = sum(value_set)
+    mins, maxes = get_min_max_sums(value_set)
+    chaosdict = {pt: (x, get_min_max_len(mins, maxes, x)) for x, pt in chaos}
+    ominos = []
+    def chaos_recurse(ominos, board, remclue):
+      if len(ominos) == l:
+        print(ominos)
+        return
+      if len(remclue) == 0: return
+      pt = sorted(((chaosdict[x][0], x) for x in remclue), reverse=True)[0][1]
+      #pt = next(iter(remclue))
+      for omino in region_ominos(pt, board, ()): #(region_ominos(pt, board, ()) if pt != (0, 7) else {frozenset({(0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (1, 6), (1, 7)})}) if pt != (0, 0) else {frozenset({(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (0, 1), (1, 1)})}:
+        #if any(len(omino.intersection(o)) != 0 for o in ominos): continue
+        curp = []
+        for p in omino:
+          if p in chaosdict:
+            minlen, maxlen = chaosdict[p][1]
+            cells = get_north_south_east_west_visible(omino, p)
+            if len(cells) < minlen or len(cells) > maxlen: break
+            if any(y != chaosdict[p][0] and cells == c for y, c in curp): break
+            curp.append(p)
+        else:
+          if len(ominos) == 2: print(omino)
+          chaos_recurse(ominos + [omino], add_region([x.copy() for x in board], omino, len(ominos)+1), remclue.difference(curp))
+    chaos_recurse([], empty_board, {pt for _, pt in chaos})
+    """
+    for x, pt in chaos:
+      ominos.append([])
+      for omino in region_ominos(pt, empty_board, ()):
+        #check all clues that are in the omino and make sure they dont sum to more than tot
+        curp = []
+        for p in omino:
+          if p in chaosdict:
+            minlen, maxlen = chaosdict[p][1]
+            cells = get_north_south_east_west_visible(omino, p)
+            if len(cells) < minlen or len(cells) > maxlen: break
+            if any(y != chaosdict[p][0] and cells == c for y, c in curp): break
+            curp.append((chaosdict[p][0], cells))
+        else:
+          ominos[-1].append(curp)
+      print(x, len(ominos[-1]))
+    """
+    return cnf
+  return sat_chaos_inner
 def sat_killer(killer):
   def sat_killer_inner(sudoku, mutex_rules, cell_visibility_rules, value_set):
     l, cnf = len(sudoku), []
@@ -1073,8 +1182,27 @@ def sat_killer(killer):
     for x, y in killer:
       #print(x, y)
       exclude = []
-      minsum, maxsum = min_sum_efficient([value_set for _ in y]), max_sum_efficient([value_set for _ in y])
-      allcombs = find_sum_efficient(x, [value_set for _ in y])      
+      #minsum, maxsum = min_sum_efficient([value_set for _ in y]), max_sum_efficient([value_set for _ in y])
+      allcombs = find_sum_efficient(x, [set(value_set) for _ in y])
+      used = set.union(*(set(z) for z in allcombs))
+      for v in value_set - used:
+        for pt in y:
+          cnf.append([-transform(pt[0], pt[1], v-1, l)])
+      if len(allcombs) == 1: continue
+      for comb in itertools.combinations(used, len(y)):
+        if sum(comb) == x: continue
+        cnf.extend([[-transform(y[i][0], y[i][1], p - 1, l) for i, p in enumerate(perm)] for perm in itertools.permutations(comb)])
+      """
+      for u in used:
+        common = set.union(*(set(comb) for comb in allcombs if u in comb))# - set((u,))
+        for pt in y:
+          for negcomb in used.difference(common):
+            for p in y:
+              if p == pt: continue
+              if x == 21: print(pt, u, p, negcomb)
+              cnf.append([transform(pt[0], pt[1], u-1, l), -transform(p[0], p[1], negcomb-1, l)])
+              """
+      """
       groups = list(get_mutex_cells(y, cell_visibility_rules, l))
       groupcand = get_mutex_groups_min_dependent(groups)
       sets = []
@@ -1085,6 +1213,7 @@ def sat_killer(killer):
         #else:
         sets.extend(get_all_mutex_digit_sum_group_sets(xp, [[(rem[j[0]][j[1]], f) for j, f in g] for g in groupcand], [set() for _ in groupcand]))
       if renban: sets = list(filter(lambda z: max(z) - min(z) == len(y) - 1, sets))
+      """
     return cnf
   return sat_killer_inner
 def sat_thermo(thermo):
@@ -1109,7 +1238,7 @@ def sat_solve_sudoku(sudoku, mutex_rules, cell_visibility_rules, extra_set_rules
     cnf.extend(rules(sudoku, mutex_rules, cell_visibility_rules, value_set))
   cell_visibility_rules = mutex_regions_to_visibility(mutex_rules) + cell_visibility_rules
   cell_pairs = set()
-  for regions in mutex_rules:
+  for regions in mutex_rules: #house constraints for 3, 6, 7, 8, 9 are technically not needed or rows/column 3, 6, 9
     for region in regions:
       for x, y in itertools.combinations(region, 2):
         cell_pairs.add(frozenset((x, y)))
@@ -1117,8 +1246,8 @@ def sat_solve_sudoku(sudoku, mutex_rules, cell_visibility_rules, extra_set_rules
         cnf.append([transform(pt[0], pt[1], s, l) for pt in region]) #inclusive - must have each value in each mutally exclusive region 27*9=243 or 3n^2
   for i in range(l):
     for j in range(l):
-      cnf.append([transform(i, j, s, l) for s in range(len(value_set))]) #inclusive - must have a value of 1-9 in each cell 81 or n^2
-      for x, y in itertools.combinations(cnf[-1], 2): #exclusive - must not have 2 values in any cell 81 * (2 choose 9)=2916 or n^2*n(n-1)/2
+      #cnf.append() #inclusive - must have a value of 1-9 in each cell 81 or n^2
+      for x, y in itertools.combinations([transform(i, j, s, l) for s in range(len(value_set))], 2): #exclusive - must not have 2 values in any cell 81 * (2 choose 9)=2916 or n^2*n(n-1)/2
         cnf.append([-x, -y])
       for pt in cell_visibility(i, j, l, cell_visibility_rules): #exclusive - pairs of cells which see each other 81*(9-1+9-1+9+1-sqrt(9)-sqrt(9))/2*9=7290 or n^2*(n-1+n-1+n+1-sqrt(n)-sqrt(n))/2*n
         p = frozenset(((i, j), pt))
@@ -1126,7 +1255,8 @@ def sat_solve_sudoku(sudoku, mutex_rules, cell_visibility_rules, extra_set_rules
         cell_pairs.add(p)
         for s in range(len(value_set)):
           cnf.append([-transform(i, j, s, l), -transform(pt[0], pt[1], s, l)])
-  #3n^2+n^2+n^2*n(n-1)/2+n^2*(n-1+n-1+n+1-sqrt(n)-sqrt(n))/2*n=2n^4-n^3+4n^2-n^(7/2)
+  #3n^2+n^2*n(n-1)/2+n^2*(n-1+n-1+n+1-sqrt(n)-sqrt(n))/2*n=2n^4-n^3+3n^2-n^(7/2)
+  #3n^2+n^2*n(n-1)/2 is 3159 minimum constraints
   #for 9x9 there are 10530 constraints
   print(len(cnf))
   for i, x in enumerate(sudoku):
@@ -1268,7 +1398,7 @@ def get_border_count(board, exc):
       if j == l-1 or ((i, j), (i, j+1)) in exc or not board[i][j+1] is None: count += 5 if j == l-1 or ((i, j), (i, j+1)) in exc else 1
       rem[i][j] = count
   return rem
-  
+"""
 def get_hole_path(path, exc, l, cur_hole, x, y):
   if (x, y) in path or (x, y) in cur_hole: return cur_hole
   cur_hole.add((x, y))
@@ -1276,6 +1406,18 @@ def get_hole_path(path, exc, l, cur_hole, x, y):
   if x != 0 and not ((x-1, y), (x, y)) in exc: cur_hole = get_hole_path(path, exc, l, cur_hole, x-1, y)
   if y != l-1 and not ((x, y), (x, y+1)) in exc: cur_hole = get_hole_path(path, exc, l, cur_hole, x, y+1)
   if y != 0 and not ((x, y-1), (x, y)) in exc: cur_hole = get_hole_path(path, exc, l, cur_hole, x, y-1)
+  return cur_hole
+"""
+def get_hole_path(path, exc, l, cur_hole, x, y):
+  stk = {(x, y)}
+  while len(stk) != 0:
+    (x, y) = stk.pop()
+    if (x, y) in path or (x, y) in cur_hole: continue
+    cur_hole.add((x, y))
+    if x != l-1 and not ((x, y), (x+1, y)) in exc: stk.add((x+1, y))
+    if x != 0 and not ((x-1, y), (x, y)) in exc: stk.add((x-1, y))
+    if y != l-1 and not ((x, y), (x, y+1)) in exc: stk.add((x, y+1))
+    if y != 0 and not ((x, y-1), (x, y)) in exc: stk.add((x, y-1))
   return cur_hole
 def get_path_boundary(path, l):
   points = set()
@@ -1292,7 +1434,8 @@ def region_ominos(point, board, exc):
     for (x, y) in get_path_boundary(path, l):
       if (x, y) in not_hole: continue
       cur_hole = get_hole_path(path, exc, l, set(), x, y)
-      if len(cur_hole) < l: return False
+      #if len(cur_hole) < l: return False
+      if len(cur_hole) % l != 0: return False
       not_hole = not_hole.union(cur_hole)
     return True
   paths = set((frozenset((point,)),))
@@ -1861,7 +2004,7 @@ def get_mutex_groups_min_dependent(groups): #this is a graph problem...
     groupcand[i] = dependents
   return groupcand
 def exclude_killer_rule_gen(killer): #digits unique in a cage
- def exclude_killer_rule(rem, mutex_rules, cell_visibility_rules, value_set):
+  def exclude_killer_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
     tot = sum(z for z in value_set)
     for x, y in killer:
@@ -2042,6 +2185,11 @@ def get_min_max_sums(value_set):
     if len(maxes) == 0: maxes.append(x)
     else: maxes.append(maxes[-1] + x)
   return mins, maxes
+def get_min_max_len(mins, maxes, val):
+  maxlen = len(tuple(itertools.takewhile(lambda i: i <= val, mins)))
+  minlen = len(tuple(itertools.takewhile(lambda i: i <= val, maxes)))
+  if val != 0 and maxes[minlen-1] != val: minlen += 1
+  return minlen, maxlen
 def exclude_sandwich_rule_gen(sandwiches):
   def exclude_sandwich_rule(rem, mutex_rules, cell_visibility_rules, value_set):
     l, possible = len(rem), []
@@ -2050,9 +2198,7 @@ def exclude_sandwich_rule_gen(sandwiches):
     sandwichset = set((min(value_set), max(value_set))) #1 and 9
     for x in sandwiches:
       remtot = tot - sum(sandwichset) - x[0]
-      maxlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], mins)))
-      minlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], maxes)))
-      if x[0] != 0 and maxes[minlen-1] != x[0]: minlen += 1
+      minlen, maxlen = get_min_max_len(mins, maxes, x[0])
       contig = tuple(sorted(x[1]))
       possibles = [set() for _ in range(len(x[1]))]
       for z in range(minlen, maxlen+1, 1):
@@ -2850,7 +2996,7 @@ def exclude_snake_egg_rule_gen(snake, cagesizes):
     return possible
   return exclude_snake_egg_rule
 def check_puzzle(y):
-  sat_solve_sudoku(y[0], y[1], y[2], () if len(y) <= 7 else y[7], y[4])
+  if len(y) > 7: sat_solve_sudoku(y[0], y[1], y[2], () if len(y) <= 7 else y[7], y[4])
   rem, solve_path, border = solve_sudoku(y[0], y[1], y[2], y[3], y[4], y[5])
   rem, valid = check_sudoku(rem, y[1], y[4])
   print(logical_solve_string(solve_path, y[1]))
@@ -2951,13 +3097,16 @@ def partial_border_diagonal_thermo_sudoku(puzzle, exclusions, thermo):
   #exclude_inequality_rule_gen(inequalities)
   return (puzzle, (*standard_sudoku_singoverlap_regions(l), diagonal_sudoku_regions(l)), (), (exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)), lambda: brute_border(exclusions, l, puzzle, (*standard_sudoku_singoverlap_regions(l), diagonal_sudoku_regions(l)), (), (exclude_thermo_rule_gen(thermo),), frozenset(range(1, l+1)))[1],
       (lambda x, border: print_border(x, exc_from_border(border, exclusions)), lambda x, border: print_candidate_border(x, exc_from_border(border, exclusions))))
+def chaos_sudoku(puzzle, clues):
+  l = len(puzzle)
+  return (puzzle, standard_sudoku_singoverlap_regions(l), (), (), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format), (sat_chaos(clues),))
 def killer_cages_sudoku(puzzle, killer):
   l = len(puzzle)
   value_set = frozenset(range(1, l+1))
   #tuple(frozenset(x) for x in jigsaw_to_coords(killer_to_jigsaw(killer, l)).values()) #not mutual exclusive across value set
   #if killer cage is in a row, column or subsquare we dont need to include it as part of cell visibility since its redundant...  
   return (puzzle, standard_sudoku_mutex_regions(l), (killer_puzzle_gen([(x, y) for x, y in killer if x <= sum(value_set) and len(y) <= l]),), (exclude_killer_rule_gen(killer), exclude_cage_hidden_tuple_rule_gen([y for _, y in killer]), exclude_cage_mirror_rule_gen([y for _, y in killer])), value_set, None,
-          (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))))
+          (lambda x: print_border(x, exc_from_border(killer_to_jigsaw(killer, l), set())), lambda x: print_candidate_border(x, exc_from_border(killer_to_jigsaw(killer, l), set()))), (sat_killer(killer),))
 def killer_cage_value_set(puzzle, killer, value_set):
   l = len(puzzle)
   #killer = [(x+len(y), y) for x, y in killer]; value_set = {x+1 for x in value_set}
@@ -3292,6 +3441,16 @@ def royal_clone_sudoku(puzzle, cages, mirror_sub_squares):
 def fibonacci_rule_sudoku(puzzle, cages):
   l = len(puzzle)
   return (puzzle, standard_sudoku_mutex_regions(l), (), (exclude_fibonacci_rule_gen(cages),), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
+def kropki_sudoku(puzzle, jigsaw, clues):
+  l = len(puzzle)
+  doubles = [(x, y) for d, x, y in clues if not d]
+  consec = [(x, y) for d, x, y in clues if d]
+  anti_consec = [((i, j), (i+1, j)) for i in range(l-1) for j in range(l) if not ((i, j), (i+1, j)) in consec] + [
+                 ((j, i), (j, i+1)) for i in range(l-1) for j in range(l) if not ((j, i), (j, i+1)) in consec]
+  #print(doubles, consec, anti_consec)
+  print(jigsaw)
+  return (puzzle, (*standard_sudoku_singoverlap_regions(l), tuple(frozenset(x) for x in jigsaw_to_coords(jigsaw).values())), (), (exclude_double_rule_gen(doubles),exclude_renban_rule_gen([[(True, c)] for c in consec] + [[(False, c)] for c in anti_consec]),), frozenset(range(1, l+1)), None,
+    (lambda x: print_border(x, exc_from_border(jigsaw, set())), lambda x: print_candidate_border(x, jigsaw))) 
 def manhattan_thermo_doubles_sudoku(puzzle, thermo, doubles, taxis, max_subset):
   l = len(puzzle)
   return (puzzle, (*standard_sudoku_mutex_regions(l), diagonal_sudoku_regions(l)), (), (exclude_thermo_rule_gen(thermo),exclude_double_rule_gen(doubles),exclude_manhattan_rule_gen(taxis,max_subset)), frozenset(range(1, l+1)), None, (print_sudoku, print_candidate_format))
@@ -4110,14 +4269,39 @@ def get_ctc_puzzles():
   build_own_killer_sudoku_clues = ((35, (0, 0)), (45, (0, 2)), (26, (0, 3)), (12, (0, 5)), (1, (0, 6)), (42, (1, 7)), (6, (1, 8)),
     (43, (2, 0)), (36, (3, 3)), (19, (3, 5)), (14, (3, 6)), (30, (3, 8)), (16, (4, 5)), (9, (5, 0)), (1, (5, 8)), (14, (6, 4)),
     (22, (7, 5)), (10, (7, 6)), (6, (8, 2)), (18, (8, 3)))
+  
+  killer_construction_chaos_sudoku = ((None,) * 6,) * 6 #https://logic-masters.de/Raetselportal/Raetsel/zeigen.php?chlang=en&id=0003MW
+  killer_construction_chaos_sudoku = ((3, (0, 0)), (19, (0, 1)), (11, (1, 0)), (15, (1, 1)), (5, (1, 4)), (10, (1, 5)), (15, (2, 2)), (17, (2, 5)),
+    (21, (4, 0)), (7, (4, 1)), (10, (4, 3)))  
+  
+  hour_pure_logic_chaos_sudoku = ( #https://www.youtube.com/watch?v=aUOvCejkJtU
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, 1, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None),
+    (None, None, None, None, None, None, None, None, None))
+  hour_pure_logic_chaos_sudoku_clues = ((44, (0, 0)), (43, (0, 7)), (25, (2, 3)), (26, (2, 5)), (12, (3, 2)), (28, (3, 6)),
+    (22, (5, 6)), (13, (6, 2)), (5, (6, 4)), (40, (7, 0)), (41, (7, 7)), (26, (8, 6)))
+    
+  kropki_min_dots_sudoku = ((None,) * 6,) * 6
+  kropki_min_dots_sudoku_jigsaw = get_jigsaw_rects(get_rects(6 // 3, 6 // 2, 6), 6)
+  kropki_min_dots_sudoku_clues = (
+    (True, (1, 0), (1, 1)), (False, (1, 2), (1, 3)), (True, (1, 4), (1, 5)),
+    (True, (2, 1), (2, 2)), (True, (2, 3), (2, 4)), (True, (3, 4), (4, 4)),
+    (False, (4, 2), (4, 3)), (True, (4, 3), (4, 4)), (False, (4, 4), (4, 5)),
+    (True, (5, 0), (5, 1)), (False, (5, 1), (5, 2)))
+    
+  
   #sum(x[0] for x in build_own_killer_sudoku_clues) == 9 * sum(x for x in range(1, 9+1))
   #mins, maxes = get_min_max_sums({x for x in range(1, 9+1)})
   #(35, 45, 26, 12, 1, 42, 6, 43, 36, 19, 14, 30, 16, 9, 1, 14, 22, 10, 6, 18)
   #digitposs = []
   #for x in build_own_killer_sudoku_clues:
-  #  maxlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], mins)))
-  #  minlen = len(tuple(itertools.takewhile(lambda i: i <= x[0], maxes)))
-  #  if x[0] != 0 and maxes[minlen-1] != x[0]: minlen += 1
+  #  minlen, maxlen = get_min_max_len(mins, maxes, x[0])
   #  digitposs.append(tuple(range(minlen, maxlen+1)))
   #[(5, 6, 7), (9,), (4, 5, 6), (2, 3, 4), (1,), (7, 8), (1, 2, 3), (8,), (6, 7, 8), (3, 4, 5), (2, 3, 4), (4, 5, 6, 7), (2, 3, 4, 5), (1, 2, 3), (1,), (2, 3, 4), (3, 4, 5, 6), (2, 3, 4), (1, 2, 3), (3, 4, 5)]
   #math.prod(len(d) for d in digitposs) #68024448
@@ -4133,7 +4317,9 @@ def get_ctc_puzzles():
   #print_candidate_border(brute_border(nightmare_sudoku_subsquare_exc, 6)[0], nightmare_sudoku_subsquare_exc)
   #return ()
   return (
-    killer_cages_sudoku(killer_xxl_sudoku, killer_xxl_sudoku_cages),
+    kropki_sudoku(kropki_min_dots_sudoku, kropki_min_dots_sudoku_jigsaw, kropki_min_dots_sudoku_clues),
+    chaos_sudoku(killer_construction_chaos_sudoku, hour_pure_logic_chaos_sudoku_clues),
+    chaos_sudoku(hour_pure_logic_chaos_sudoku, hour_pure_logic_chaos_sudoku_clues),
     #big_little_killer_sudoku(big_little_killer_puzzle, big_little_killer_puzzle_cages, big_little_killer_puzzle_diagonals),
     #standard_sudoku(hardest_sudoku),
     #king_sudoku(king_knight_queen_sudoku),
